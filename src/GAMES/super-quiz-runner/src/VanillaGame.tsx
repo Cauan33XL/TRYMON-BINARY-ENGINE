@@ -242,7 +242,7 @@ export default function VanillaGame() {
                 <div style={{position:'absolute',top:0,left:0,width:'100%',height:'100%',background:'rgba(0,0,0,0.5)',zIndex:10,pointerEvents:'none'}} />
             )}
             
-            <div className="hud top-info" style={{zIndex: 0}}>Use &larr; &rarr; ou A/D para mover, W/&uarr;/SPACE para pular, SHIFT para dash, F atirar, E habilidade</div>
+            <div className="hud top-info" style={{zIndex: 0}}>Use WASD ou Setas para mover, SPACE para pular, SHIFT para dash, F atirar, E habilidade</div>
         </div>
     );
 }

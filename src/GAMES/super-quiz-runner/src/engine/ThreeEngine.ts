@@ -18,9 +18,9 @@ const MAX_JUMPS       = 2;
 const PW              = 0.55;   // player collision half-width (x)
 const PH              = 1.55;   // player collision height
 const SHOOT_CD        = 0.45;
-
-// Max horizontal jump range: speed × (2 × jumpForce / |gravity|)
-const MAX_REACH_Z = PLAYER_SPEED * ((2 * JUMP_FORCE) / Math.abs(GRAVITY_ACC));  // ≈ 9.3
+const ACCEL_Z         = 50;     // manual movement acceleration
+const FRICTION_Z      = 35;     // manual movement friction
+const MAX_BACK_SPEED  = -4;     // max backward speed
 
 // ─── Simple AABB ──────────────────────────────────────────────────────────────
 function makePlayerBox(pos: THREE.Vector3) {
@@ -84,6 +84,7 @@ export class ThreeEngine {
     invincible = 0;
     shootTimer = 0;
     keys: Record<string, boolean> = {};
+    currentScrollZ = 0;
 
     // World entities
     platforms: Platform[] = [];
@@ -174,99 +175,98 @@ export class ThreeEngine {
 
     // ─── Cartoon Man ──────────────────────────────────────────────────────────
     createCartoonMan(char = 'default'): THREE.Group {
-        const grp    = new THREE.Group();
-        grp.name     = 'player';
-        const shirt  = this.C.shirt[char] ?? this.C.shirt['default'];
-        const pants  = this.C.pants[char] ?? this.C.pants['default'];
-        const skin   = this.C.skin;
+        const grp = new THREE.Group();
+        grp.name = 'player';
+        
+        // Materials
+        const clrShirt = this.C.shirt[char] ?? this.C.shirt['default'];
+        const clrPants = this.C.pants[char] ?? this.C.pants['default'];
+        const skinMat  = new THREE.MeshStandardMaterial({ color: this.C.skin, roughness: 0.8 });
+        const shirtMat = new THREE.MeshStandardMaterial({ color: clrShirt, roughness: 0.7 });
+        const pantsMat = new THREE.MeshStandardMaterial({ color: clrPants, roughness: 0.75 });
 
-        const limb = (r: number, len: number, color: number) => {
+        if (char === 'robot') {
+            skinMat.color.set(0x94a3b8);
+            skinMat.metalness = 0.8; skinMat.roughness = 0.2;
+            shirtMat.metalness = 0.8; shirtMat.roughness = 0.3;
+            pantsMat.metalness = 0.8; pantsMat.roughness = 0.3;
+        }
+        if (char === 'ninja') skinMat.color.set(0x1a1c1e);
+
+        const limb = (r: number, len: number, mat: THREE.Material) => {
             const pivot = new THREE.Group();
-            const geo   = new THREE.CapsuleGeometry(r, len, 6, 10);
-            const mesh  = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: 0.75 }));
+            const geo = new THREE.CapsuleGeometry(r, len, 6, 10);
+            const mesh = new THREE.Mesh(geo, mat);
             mesh.castShadow = true;
             mesh.position.y = -(len * 0.5 + r);
             pivot.add(mesh);
             return pivot;
         };
 
-        // Torso (waist at y=0, top at ~0.5)
-        const torsoGeo = new THREE.CapsuleGeometry(0.27, 0.44, 6, 10);
-        this.playerMesh = new THREE.Mesh(torsoGeo, new THREE.MeshStandardMaterial({ color: shirt, roughness: 0.6 }));
+        // Torso
+        this.playerMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.27, 0.44, 6, 10), shirtMat);
         this.playerMesh.castShadow = true;
+        this.playerMesh.position.y = 0.65;
         grp.add(this.playerMesh);
-
         this.playerParts['torso'] = this.playerMesh;
 
         // Head
-        const head = new THREE.Mesh(
-            new THREE.SphereGeometry(0.235, 16, 16),
-            new THREE.MeshStandardMaterial({ color: skin, roughness: 0.8 })
-        );
-        head.castShadow = true;
-        head.position.y = 0.62;
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), skinMat);
+        head.position.y = 0.5;
         this.playerMesh.add(head);
         this.playerParts['head'] = head;
 
-        // Eyes
-        const eyeMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
-        const hlMat  = new THREE.MeshBasicMaterial({ color: 0xffffff });
-        [0.1, -0.1].forEach(ox => {
-            const e = new THREE.Mesh(new THREE.SphereGeometry(0.043, 8, 8), eyeMat);
-            e.position.set(ox, 0.05, 0.195);
-            const hl = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 6), hlMat);
-            hl.position.set(0.01, 0.018, 0.04); e.add(hl);
-            head.add(e);
-        });
+        // Eyes / Visor
+        if (char === 'robot') {
+            const visor = new THREE.Mesh(
+                new THREE.BoxGeometry(0.4, 0.08, 0.1),
+                new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x38bdf8, emissiveIntensity: 2 })
+            );
+            visor.position.set(0, 0.08, 0.22);
+            head.add(visor);
+        } else {
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+            [0.1, -0.1].forEach(ox => {
+                const e = new THREE.Mesh(new THREE.SphereGeometry(0.043, 8, 8), eyeMat);
+                e.position.set(ox, 0.06, 0.22);
+                head.add(e);
+            });
+        }
 
-        // Smile
-        const smile = new THREE.Mesh(
-            new THREE.TorusGeometry(0.065, 0.013, 6, 12, Math.PI),
-            new THREE.MeshBasicMaterial({ color: 0x5c2d00 })
-        );
-        smile.position.set(0, -0.065, 0.21);
-        smile.rotation.z = Math.PI;
-        head.add(smile);
+        // Accessories
+        if (char === 'ninja') {
+            const band = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.08, 16, 1, true), new THREE.MeshStandardMaterial({ color: 0xef4444 }));
+            band.position.set(0, 0.08, 0); head.add(band);
+            for(let i=0; i<2; i++) {
+                const strip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.015, 0.35), new THREE.MeshStandardMaterial({ color: 0xef4444 }));
+                strip.position.set(0.06 * (i?1:-1), 0.08, -0.28);
+                head.add(strip);
+            }
+        } else if (char === 'mage') {
+            const hat = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.7, 12), new THREE.MeshStandardMaterial({ color: 0x4c1d95 }));
+            hat.position.set(0, 0.45, 0); head.add(hat);
+            const rim = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.04, 16), new THREE.MeshStandardMaterial({ color: 0x4c1d95 }));
+            rim.position.set(0, 0.15, 0); head.add(rim);
+        } else if (char === 'robot') {
+            const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.25), new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 1 }));
+            ant.position.set(0, 0.4, 0); head.add(ant);
+            const tip = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 8), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
+            tip.position.set(0, 0.13, 0); ant.add(tip);
+        } else {
+            const hair = new THREE.Mesh(new THREE.SphereGeometry(0.245, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), new THREE.MeshStandardMaterial({ color: 0x241400 }));
+            hair.position.y = 0.08; head.add(hair);
+        }
 
-        // Hair
-        const hair = new THREE.Mesh(
-            new THREE.SphereGeometry(0.25, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
-            new THREE.MeshStandardMaterial({ color: 0x2d1600, roughness: 1 })
-        );
-        hair.position.set(0, 0.035, 0);
-        head.add(hair);
+        // Limbs
+        const armL = limb(0.087, 0.37, skinMat); armL.position.set(0.375, 0.19, 0);
+        this.playerMesh.add(armL); this.playerParts['armL'] = armL;
+        const armR = limb(0.087, 0.37, skinMat); armR.position.set(-0.375, 0.19, 0);
+        this.playerMesh.add(armR); this.playerParts['armR'] = armR;
 
-        // Arms
-        const armL = limb(0.087, 0.37, skin);
-        armL.position.set(0.375, 0.19, 0);
-        this.playerMesh.add(armL);
-        this.playerParts['armL'] = armL;
-
-        const armR = limb(0.087, 0.37, skin);
-        armR.position.set(-0.375, 0.19, 0);
-        this.playerMesh.add(armR);
-        this.playerParts['armR'] = armR;
-
-        // Legs
-        const legL = limb(0.125, 0.40, pants);
-        legL.position.set(0.135, -0.23, 0);
-        this.playerMesh.add(legL);
-        this.playerParts['legL'] = legL;
-
-        const legR = limb(0.125, 0.40, pants);
-        legR.position.set(-0.135, -0.23, 0);
-        this.playerMesh.add(legR);
-        this.playerParts['legR'] = legR;
-
-        // Shoes
-        const shGeo = new THREE.BoxGeometry(0.21, 0.095, 0.31);
-        const shMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
-        [legL, legR].forEach(leg => {
-            const shoe = new THREE.Mesh(shGeo, shMat);
-            const child = leg.children[0] as THREE.Mesh;
-            shoe.position.set(0, child.position.y - 0.2, 0.04);
-            leg.add(shoe);
-        });
+        const legL = limb(0.12, 0.42, pantsMat); legL.position.set(0.135, -0.23, 0);
+        this.playerMesh.add(legL); this.playerParts['legL'] = legL;
+        const legR = limb(0.12, 0.42, pantsMat); legR.position.set(-0.135, -0.23, 0);
+        this.playerMesh.add(legR); this.playerParts['legR'] = legR;
 
         return grp;
     }
@@ -306,8 +306,8 @@ export class ThreeEngine {
         this.lastSafeX   = 0;
         this.lastSafeY   = 1.0;
 
-        // Level generation seed
-        this.genZ      = -25;
+        // Level generation seed - aligned with starting platform edge
+        this.genZ      = -22.5;
         this.lastPlatY = 0;
         this.lastPlatX = 0;
 
@@ -359,23 +359,27 @@ export class ThreeEngine {
     // ─── Procedural Generator ─────────────────────────────────────────────────
     private generateSegment() {
         const level = globals.currentLevel || 0;
+        const worldSpeed = WORLD_SPEED_BASE * (1 + level * 0.07);
 
-        // Platform size — gets narrower / longer with level
-        const pW   = THREE.MathUtils.randFloat(Math.max(3, 7 - level * 0.4), Math.max(5, 10 - level * 0.5));
-        const pLen = THREE.MathUtils.randFloat(9, 20);
-        const pH   = 1;
+        // Platform size — stays relatively wide for gameplay comfort
+        const pW   = THREE.MathUtils.randFloat(Math.max(4.5, 7.5 - level * 0.15), Math.max(6, 12 - level * 0.2));
+        const pLen = THREE.MathUtils.randFloat(10, 22);
+        const pH   = 1.0;
 
-        // Gap — bounded by physics
-        const maxGap = Math.min(MAX_REACH_Z * 0.72, 6.5 + level * 0.25);
-        const gap    = THREE.MathUtils.randFloat(1.8, maxGap);
+        // Peak jump reach logic (at 2*v0/g airtime)
+        // Airtime is approx 0.9-1.1s. Safer distance at 13 units/s is ~12.
+        // We cap our gap significantly below that for a buffer.
+        const absMaxGap = (worldSpeed * 0.65); // 0.65s of airtime to cross
+        const maxGap = Math.min(absMaxGap, 5.0 + level * 0.3); // Scales from 5.0 up to 8.0+
+        const gap    = THREE.MathUtils.randFloat(2.0, maxGap);
 
-        // Vertical drift
-        const dY = THREE.MathUtils.randFloat(-1.2, 1.2);
-        const newY = Math.max(-1.8, Math.min(2, this.lastPlatY + dY));
+        // Vertical drift - capped to avoid "unreachable peaks"
+        const dY    = THREE.MathUtils.randFloat(-1.25, 1.25);
+        const newY  = Math.max(-2.5, Math.min(2.5, this.lastPlatY + dY));
 
         // Horizontal drift
-        const dX  = THREE.MathUtils.randFloat(-3, 3);
-        const newX = Math.max(-5, Math.min(5, this.lastPlatX + dX));
+        const dX    = THREE.MathUtils.randFloat(-3.2, 3.2);
+        const newX  = Math.max(-6.5, Math.min(6.5, this.lastPlatX + dX));
 
         // Type ramp
         const rand = Math.random();
@@ -492,7 +496,7 @@ export class ThreeEngine {
 
         if (globals.gameState !== STATES.RUNNING) return;
 
-        const isJump = e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW';
+        const isJump = e.code === 'Space';
         if (isJump) {
             this.jumpHeld = true;
             if (this.jumpCount < MAX_JUMPS) {
@@ -520,7 +524,7 @@ export class ThreeEngine {
 
     private onKeyUp = (e: KeyboardEvent) => {
         delete this.keys[e.code];
-        const isJump = e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW';
+        const isJump = e.code === 'Space';
         if (isJump) this.jumpHeld = false;
     };
 
@@ -602,6 +606,12 @@ export class ThreeEngine {
         if (!armL || !armR || !legL || !legR || !torso || !head) return;
 
         const inAir = this.jumpCount > 0;
+        
+        // Calculate total movement intensity for animation speed (X and Z)
+        const strafeSpd = Math.abs(PLAYER_SPEED * ((this.keys['KeyA'] || this.keys['ArrowLeft'] ? -1 : 0) + (this.keys['KeyD'] || this.keys['ArrowRight'] ? 1 : 0)));
+        const moveMagnitude = Math.sqrt(strafeSpd * strafeSpd + this.currentScrollZ * this.currentScrollZ);
+        const normSpeed = Math.min(moveMagnitude / WORLD_SPEED_BASE, 1.8);
+
         if (inAir) {
             const rising = this.vel.y > 0;
             const ta = rising ? -Math.PI * 0.72 : Math.PI * 0.22;
@@ -613,9 +623,10 @@ export class ThreeEngine {
             legR.rotation.x = THREE.MathUtils.lerp(legR.rotation.x, tl * 0.5, k);
             torso.rotation.x = THREE.MathUtils.lerp(torso.rotation.x, rising ? -0.08 : 0.12, k);
             (torso as any).position.y = 0;
-        } else {
-            const spd = 17;
-            const amp = 0.9;
+        } else if (normSpeed > 0.05) {
+            // Running animation scales with move speed
+            const spd = 12 + normSpeed * 8;
+            const amp = 0.8 + normSpeed * 0.2;
             legL.rotation.x = Math.sin(t * spd) * amp;
             legR.rotation.x = Math.sin(t * spd + Math.PI) * amp;
             armL.rotation.x = Math.sin(t * spd + Math.PI) * amp * 0.65;
@@ -625,6 +636,18 @@ export class ThreeEngine {
             (torso as any).position.y = Math.abs(Math.sin(t * spd * 2)) * 0.065;
             torso.rotation.x = THREE.MathUtils.lerp(torso.rotation.x, 0.14, 5 * dt);
             head.rotation.x  = Math.sin(t * spd) * 0.07;
+        } else {
+            // Idle state
+            const k = 8 * dt;
+            legL.rotation.x = THREE.MathUtils.lerp(legL.rotation.x, 0, k);
+            legR.rotation.x = THREE.MathUtils.lerp(legR.rotation.x, 0, k);
+            armL.rotation.x = THREE.MathUtils.lerp(armL.rotation.x, 0, k);
+            armR.rotation.x = THREE.MathUtils.lerp(armR.rotation.x, 0, k);
+            armL.rotation.z = THREE.MathUtils.lerp(armL.rotation.z, 0.1, k);
+            armR.rotation.z = THREE.MathUtils.lerp(armR.rotation.z, -0.1, k);
+            torso.rotation.x = THREE.MathUtils.lerp(torso.rotation.x, 0, k);
+            (torso as any).position.y = THREE.MathUtils.lerp((torso as any).position.y, 0, k);
+            head.rotation.x  = THREE.MathUtils.lerp(head.rotation.x, 0, k);
         }
 
         // Lean left/right
@@ -720,6 +743,21 @@ export class ThreeEngine {
         if (this.dashTimer   > 0) this.dashTimer    -= dt;
         if (this.dashTimer   <= 0) this.isDashing = false;
 
+        // ── Character Specific Effects ──
+        const chr = globals.selectedCharacter || 'default';
+        if (chr === 'ninja' && this.isDashing) {
+            this.spawnParticles(this.player.position.clone().add(new THREE.Vector3(0, 0.5, 0)), 0x333333, 1);
+        }
+        if (chr === 'mage' && (Math.abs(this.vel.y) > 2 || this.distZ % 5 < 0.2)) {
+            this.spawnParticles(this.player.position.clone().add(new THREE.Vector3(0, 0.2, 0)), 0x8b5cf6, 1);
+        }
+        if (chr === 'robot') {
+             // Antenna wiggle
+             const ant = this.playerParts['head']?.children.find(c => (c as any).isMesh && c.position.y > 0.3);
+             if (ant) ant.rotation.z = Math.sin(Date.now() * 0.01) * 0.2;
+        }
+
+
         this.applyBlink();
 
         // Animation
@@ -730,10 +768,32 @@ export class ThreeEngine {
             this.animateMan(dt);
         }
 
-        // ── Movement ──
-        const worldSpeed = WORLD_SPEED_BASE * (1 + (globals.currentLevel || 0) * 0.07);
-        const moveZ      = worldSpeed * dt;
-        const hSpeed     = this.isDashing ? DASH_SPEED : PLAYER_SPEED;
+        // ── Movement (Manual Z + Strafe X) ──
+        const levelMult  = (1 + (globals.currentLevel || 0) * 0.07);
+        const maxForward = WORLD_SPEED_BASE * levelMult;
+
+        let targetZ = 0;
+        if (this.keys['KeyW'] || this.keys['ArrowUp']) targetZ = maxForward;
+        if (this.keys['KeyS'] || this.keys['ArrowDown']) targetZ = MAX_BACK_SPEED * levelMult;
+        
+        if (this.isDashing) targetZ = maxForward * 1.5;
+
+        // Smooth acceleration/friction
+        if (targetZ !== 0) {
+            const diff = targetZ - this.currentScrollZ;
+            this.currentScrollZ += diff * ACCEL_Z * dt;
+        } else {
+            const decel = FRICTION_Z * dt;
+            if (this.currentScrollZ > decel) this.currentScrollZ -= decel;
+            else if (this.currentScrollZ < -decel) this.currentScrollZ += decel;
+            else this.currentScrollZ = 0;
+        }
+
+        // Clamp
+        this.currentScrollZ = Math.max(MAX_BACK_SPEED * levelMult, Math.min(maxForward * (this.isDashing ? 1.5 : 1), this.currentScrollZ));
+
+        const moveZ  = this.currentScrollZ * dt;
+        const hSpeed = this.isDashing ? DASH_SPEED : PLAYER_SPEED;
 
         if (this.keys['ArrowLeft']  || this.keys['KeyA']) this.player.position.x -= hSpeed * dt;
         if (this.keys['ArrowRight'] || this.keys['KeyD']) this.player.position.x += hSpeed * dt;
@@ -822,13 +882,12 @@ export class ThreeEngine {
         // Fall out of world
         if (!onGround && pos.y < -15) {
             sound.fall();
+            // Teleport back to safety immediately
+            pos.set(this.lastSafeX, this.lastSafeY + 5, 0);
+            this.vel.set(0, 0, 0);
+            this.jumpCount = 0;
+            
             this.takeDamage();
-            if (globals.gameState === STATES.RUNNING) {
-                // Respawn at safe coordinates
-                pos.set(this.lastSafeX, this.lastSafeY + 5, 0);
-                this.vel.set(0, 0, 0);
-                this.jumpCount  = 0;
-            }
             return;
         }
 
