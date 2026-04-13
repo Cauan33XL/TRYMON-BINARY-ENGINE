@@ -1,0 +1,34 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const api_execute_binary: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const api_get_output: (a: number, b: number) => [number, number];
+export const api_get_status: () => [number, number];
+export const api_kernel_init: (a: number, b: number) => [number, number, number, number];
+export const api_list_dir: (a: number, b: number) => [number, number];
+export const api_list_processes: () => [number, number];
+export const api_load_binary: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const api_mount: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
+export const api_read_file: (a: number, b: number) => [number, number, number, number];
+export const api_send_input: (a: number, b: number, c: number, d: number) => [number, number];
+export const api_shell_get_prompt: () => [number, number];
+export const api_shell_input: (a: number, b: number) => [number, number];
+export const api_stop_process: (a: number, b: number) => [number, number];
+export const api_tick: () => void;
+export const api_unmount: (a: number, b: number) => [number, number];
+export const kernel_execute_binary: (a: number, b: number) => [number, number, number, number];
+export const kernel_init: () => [number, number];
+export const kernel_load_binary: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const kernel_status: () => [number, number];
+export const kernel_stop_process: (a: number, b: number) => [number, number];
+export const kernel_get_output: (a: number, b: number) => [number, number];
+export const kernel_send_input: (a: number, b: number, c: number, d: number) => [number, number];
+export const kernel_list_processes: () => [number, number];
+export const __wbindgen_exn_store: (a: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_start: () => void;

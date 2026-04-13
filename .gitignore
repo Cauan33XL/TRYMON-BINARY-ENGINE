@@ -139,7 +139,6 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 # Rust & WASM Build Artifacts
 src/kernel-rust/target/
-src/wasm/pkg/
 
 node_modules/
 # Linux Kernel Source & Binaries

@@ -1,0 +1,20 @@
+{
+  "name": "trymon-kernel-rust",
+  "type": "module",
+  "collaborators": [
+    "Trymon Team"
+  ],
+  "description": "TRYMON Binary Engine - Rust Kernel Module for Linux Binary Execution in WASM",
+  "version": "0.1.0",
+  "license": "GPL-3.0",
+  "files": [
+    "trymon_kernel_rust_bg.wasm",
+    "trymon_kernel_rust.js",
+    "trymon_kernel_rust.d.ts"
+  ],
+  "main": "trymon_kernel_rust.js",
+  "types": "trymon_kernel_rust.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
