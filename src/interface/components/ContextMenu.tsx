@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 
 export interface ContextMenuItem {
   label?: string;
@@ -6,6 +7,7 @@ export interface ContextMenuItem {
   onClick?: () => void;
   separator?: boolean;
   danger?: boolean;
+  items?: ContextMenuItem[];
 }
 
 interface ContextMenuProps {
@@ -17,6 +19,7 @@ interface ContextMenuProps {
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }) => {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<number | null>(null);
 
   useEffect(() => {
     // Adjust position if menu goes off screen
@@ -54,14 +57,32 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, items, onClose }
           ) : (
             <div 
               key={`item-${index}`}
-              className={`context-menu-item ${item.danger ? 'danger' : ''}`}
+              className={`context-menu-item ${item.danger ? 'danger' : ''} ${activeSubmenu === index ? 'active' : ''}`}
+              onMouseEnter={() => item.items && setActiveSubmenu(index)}
+              onMouseLeave={() => item.items && setActiveSubmenu(null)}
               onClick={() => {
-                item.onClick?.();
-                onClose();
+                if (!item.items) {
+                  item.onClick?.();
+                  onClose();
+                }
               }}
             >
-              {item.icon}
-              <span>{item.label}</span>
+              <div className="item-content">
+                {item.icon}
+                <span>{item.label}</span>
+              </div>
+              {item.items && <ChevronRight size={14} className="submenu-icon" />}
+              
+              {item.items && activeSubmenu === index && (
+                <div className="submenu">
+                  <ContextMenu 
+                    x={200} // This will be adjusted by CSS usually, but let's make it relative
+                    y={0} 
+                    items={item.items} 
+                    onClose={onClose} 
+                  />
+                </div>
+              )}
             </div>
           )
         ))}

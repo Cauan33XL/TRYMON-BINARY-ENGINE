@@ -70,6 +70,7 @@ pub struct MountPoint {
 }
 
 /// Virtual FileSystem subsystem
+#[derive(Debug, Serialize, Deserialize)]
 pub struct VirtualFileSystem {
     /// File tree (path -> VirtualFile)
     files: HashMap<String, VirtualFile>,
@@ -79,6 +80,24 @@ pub struct VirtualFileSystem {
     cwd: String,
     /// Whether VFS is initialized
     initialized: bool,
+    /// Transaction journal for atomic operations
+    #[serde(default, skip_serializing)]
+    journal: Vec<JournalEntry>,
+}
+
+/// Journal entry for atomic operations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JournalEntry {
+    operation: String,
+    timestamp: i64,
+    changes: Vec<FileChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FileChange {
+    path: String,
+    old_state: Option<VirtualFile>,
+    new_state: Option<VirtualFile>,
 }
 
 impl VirtualFileSystem {
@@ -89,6 +108,7 @@ impl VirtualFileSystem {
             mounts: Vec::new(),
             cwd: "/".to_string(),
             initialized: false,
+            journal: Vec::new(),
         }
     }
 
@@ -417,9 +437,8 @@ impl VirtualFileSystem {
 
     /// Rename/move a file or directory
     pub fn rename(&mut self, src: &str, dst: &str) -> Result<()> {
-        let src_file = self.files.get(src)
-            .ok_or_else(|| KernelError::FileSystemError(format!("Source not found: {}", src)))?
-            .clone();
+        self.files.get(src)
+            .ok_or_else(|| KernelError::FileSystemError(format!("Source not found: {}", src)))?;
 
         // Update the source file's path
         if let Some(file) = self.files.get_mut(src) {
@@ -488,7 +507,7 @@ impl VirtualFileSystem {
         }
         
         // Convert glob pattern to regex-like matching
-        let pattern_regex = pattern
+        let _pattern_regex = pattern
             .replace(".", "\\.")
             .replace("*", ".*")
             .replace("?", ".");
@@ -564,6 +583,192 @@ impl VirtualFileSystem {
     /// Create an empty file (convenience method)
     pub fn create_empty_file(&mut self, path: &str) -> Result<String> {
         self.create_file(path, Vec::new(), false)
+    }
+
+    // ============================================================
+    // Advanced features: path resolution, permissions, journaling
+    // ============================================================
+
+    /// Resolve a path to its canonical form
+    /// Handles: ./, ../, ~, symlinks, redundant slashes
+    pub fn resolve_path(&self, path: &str) -> Result<String> {
+        let path = if path.starts_with('~') {
+            // Expand home directory
+            let home = self.files.get("/root").map(|_| "/root".to_string())
+                .unwrap_or_else(|| "/".to_string());
+            format!("{}{}", home, &path[1..])
+        } else if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("{}/{}", self.cwd, path)
+        };
+
+        // Split and resolve components
+        let parts: Vec<&str> = path.split('/')
+            .filter(|p| !p.is_empty())
+            .collect();
+
+        let mut resolved = Vec::new();
+        for part in parts {
+            match part {
+                "." => continue,
+                ".." => { resolved.pop(); }
+                component => resolved.push(component),
+            }
+        }
+
+        if resolved.is_empty() {
+            return Ok("/".to_string());
+        }
+
+        let mut result = String::new();
+        for component in &resolved {
+            result.push('/');
+            result.push_str(component);
+        }
+
+        // Resolve symlinks
+        let final_path = self.resolve_symlinks(&result)?;
+
+        Ok(final_path)
+    }
+
+    /// Resolve symlinks in a path
+    fn resolve_symlinks(&self, path: &str) -> Result<String> {
+        let parts: Vec<&str> = path.split('/')
+            .filter(|p| !p.is_empty())
+            .collect();
+
+        let mut resolved = String::new();
+        for part in &parts {
+            resolved.push('/');
+            resolved.push_str(part);
+
+            // Check if this component is a symlink
+            if let Some(file) = self.files.get(&resolved) {
+                if file.file_type == FileType::Symlink {
+                    let target = String::from_utf8_lossy(
+                        file.content.as_ref()
+                            .ok_or_else(|| KernelError::FileSystemError("Empty symlink".into()))?
+                    ).to_string();
+
+                    // Resolve target path
+                    let target_path = if target.starts_with('/') {
+                        target
+                    } else {
+                        format!("{}/{}", resolved.rsplitn(2, '/').last().unwrap_or("/"), target)
+                    };
+
+                    // Replace current resolved path with target
+                    let remaining: Vec<&str> = parts[parts.iter().position(|&p| p == *part).unwrap() + 1..].to_vec();
+                    let mut full_path = target_path;
+                    for rem in remaining {
+                        full_path.push('/');
+                        full_path.push_str(rem);
+                    }
+
+                    return self.resolve_symlinks(&full_path);
+                }
+            }
+        }
+
+        Ok(resolved)
+    }
+
+    /// Check if a process with given uid/gid has permission to access a file
+    pub fn check_permissions(&self, path: &str, uid: u32, gid: u32, required: u16) -> Result<()> {
+        let file = self.files.get(path)
+            .ok_or_else(|| KernelError::FileSystemError(format!("File not found: {}", path)))?;
+
+        // Root (uid 0) has access to everything
+        if uid == 0 {
+            return Ok(());
+        }
+
+        let perms = file.permissions;
+
+        // Owner permissions
+        if uid == file.uid {
+            if (perms & required) == required {
+                return Ok(());
+            }
+        }
+        // Group permissions
+        else if gid == file.gid {
+            if (perms & (required << 3)) == (required << 3) {
+                return Ok(());
+            }
+        }
+        // Other permissions
+        else {
+            if (perms & (required << 6)) == (required << 6) {
+                return Ok(());
+            }
+        }
+
+        Err(KernelError::FileSystemError(
+            format!("Permission denied: {}", path)
+        ))
+    }
+
+    /// Begin a transaction (for journaling)
+    pub fn begin_transaction(&mut self, operation: &str) {
+        self.journal.push(JournalEntry {
+            operation: operation.to_string(),
+            timestamp: chrono::Utc::now().timestamp(),
+            changes: Vec::new(),
+        });
+    }
+
+    /// Record a change in the current transaction
+    #[allow(dead_code)]
+    fn record_change(&mut self, path: &str, old_state: Option<VirtualFile>, new_state: Option<VirtualFile>) {
+        if let Some(entry) = self.journal.last_mut() {
+            entry.changes.push(FileChange {
+                path: path.to_string(),
+                old_state,
+                new_state,
+            });
+        }
+    }
+
+    /// Commit the current transaction
+    pub fn commit_transaction(&mut self) -> Result<()> {
+        if let Some(entry) = self.journal.pop() {
+            log::info!("Transaction committed: {} ({} changes)", entry.operation, entry.changes.len());
+        }
+        Ok(())
+    }
+
+    /// Rollback the current transaction
+    pub fn rollback_transaction(&mut self) -> Result<()> {
+        if let Some(entry) = self.journal.pop() {
+            log::info!("Transaction rolled back: {} ({} changes)", entry.operation, entry.changes.len());
+            // Restore old states
+            for change in entry.changes {
+                match (change.old_state, change.new_state) {
+                    (Some(old), Some(_new)) => {
+                        // Restore old state
+                        self.files.insert(change.path, old);
+                    }
+                    (Some(_old), None) => {
+                        // File was created, remove it
+                        self.files.remove(&change.path);
+                    }
+                    (None, Some(_new)) => {
+                        // File was deleted, we can't restore (old state not captured)
+                        log::warn!("Cannot restore deleted file: {}", change.path);
+                    }
+                    (None, None) => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Get pending journal entries count
+    pub fn journal_len(&self) -> usize {
+        self.journal.len()
     }
 }
 

@@ -1,5 +1,5 @@
 //! Process Manager Module
-//! 
+//!
 //! Handles execution, monitoring, and management of binary processes.
 //! Simulates process forking, execution, and signal handling in WASM.
 
@@ -9,6 +9,89 @@ use serde::{Serialize, Deserialize};
 use crate::error::{Result, KernelError};
 use crate::binary_loader::{BinaryLoader, BinaryInfo};
 use crate::virtual_fs::VirtualFileSystem;
+
+/// POSIX Signals
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Signal {
+    /// Hangup detected
+    SIGHUP = 1,
+    /// Interrupt from keyboard
+    SIGINT = 2,
+    /// Quit from keyboard
+    SIGQUIT = 3,
+    /// Illegal instruction
+    SIGILL = 4,
+    /// Trace/breakpoint trap
+    SIGTRAP = 5,
+    /// Abort
+    SIGABRT = 6,
+    /// Bus error
+    SIGBUS = 7,
+    /// Segmentation fault
+    SIGSEGV = 11,
+    /// Termination signal
+    SIGTERM = 15,
+    /// Continue process
+    SIGCONT = 18,
+    /// Stop process
+    SIGSTOP = 19,
+}
+
+impl Signal {
+    /// Convert a signal number to a Signal enum
+    pub fn from_number(num: i32) -> Option<Self> {
+        match num {
+            1 => Some(Signal::SIGHUP),
+            2 => Some(Signal::SIGINT),
+            3 => Some(Signal::SIGQUIT),
+            4 => Some(Signal::SIGILL),
+            5 => Some(Signal::SIGTRAP),
+            6 => Some(Signal::SIGABRT),
+            7 => Some(Signal::SIGBUS),
+            11 => Some(Signal::SIGSEGV),
+            15 => Some(Signal::SIGTERM),
+            18 => Some(Signal::SIGCONT),
+            19 => Some(Signal::SIGSTOP),
+            _ => None,
+        }
+    }
+
+    /// Get the default action for a signal
+    pub fn default_action(&self) -> SignalAction {
+        match self {
+            Signal::SIGTERM | Signal::SIGINT | Signal::SIGHUP | Signal::SIGQUIT => SignalAction::Terminate,
+            Signal::SIGSTOP => SignalAction::Stop,
+            Signal::SIGCONT => SignalAction::Continue,
+            _ => SignalAction::Ignore,
+        }
+    }
+}
+
+/// What to do when a signal is received
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignalAction {
+    /// Ignore the signal
+    Ignore,
+    /// Terminate the process
+    Terminate,
+    /// Stop the process
+    Stop,
+    /// Continue the process
+    Continue,
+}
+
+/// Pipe for inter-process communication
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pipe {
+    /// Pipe ID
+    pub id: String,
+    /// Buffer
+    pub buffer: Vec<u8>,
+    /// Reader process PID
+    pub reader_pid: Option<String>,
+    /// Writer process PID
+    pub writer_pid: Option<String>,
+}
 
 /// Process state
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +145,14 @@ pub struct ProcessInfo {
     pub stderr: String,
     /// Standard input buffer
     pub stdin_pending: String,
+    /// Process group ID
+    pub pgid: Option<String>,
+    /// Pending signals
+    pub pending_signals: Vec<i32>,
+    /// Signal handlers (signal number -> action)
+    pub signal_handlers: HashMap<i32, SignalAction>,
+    /// Pipe ID if connected via pipe
+    pub pipe_id: Option<String>,
 }
 
 /// Process Manager subsystem
@@ -74,6 +165,8 @@ pub struct ProcessManager {
     initialized: bool,
     /// Process counter for PIDs
     process_counter: u32,
+    /// Pipes for IPC
+    pipes: HashMap<String, Pipe>,
 }
 
 impl ProcessManager {
@@ -84,6 +177,7 @@ impl ProcessManager {
             max_processes,
             initialized: false,
             process_counter: 1, // PID 1 is init
+            pipes: HashMap::new(),
         }
     }
 
@@ -120,6 +214,10 @@ impl ProcessManager {
             stdout: String::new(),
             stderr: String::new(),
             stdin_pending: String::new(),
+            pgid: None,
+            pending_signals: Vec::new(),
+            signal_handlers: HashMap::new(),
+            pipe_id: None,
         };
 
         self.processes.insert(init_pid, init);
@@ -179,6 +277,10 @@ impl ProcessManager {
             stdout: format!("Starting {}...\n", binary.name),
             stderr: String::new(),
             stdin_pending: String::new(),
+            pgid: None,
+            pending_signals: Vec::new(),
+            signal_handlers: HashMap::new(),
+            pipe_id: None,
         };
 
         // Extract binary to filesystem
@@ -269,6 +371,10 @@ impl ProcessManager {
             stdout: format!("Running {} from VFS...\n", name),
             stderr: String::new(),
             stdin_pending: String::new(),
+            pgid: None,
+            pending_signals: Vec::new(),
+            signal_handlers: HashMap::new(),
+            pipe_id: None,
         };
 
         self.processes.insert(pid.clone(), process.clone());
@@ -349,19 +455,19 @@ impl ProcessManager {
     }
 
     /// Simulate process execution tick (call periodically)
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self, uptime: u64) {
         for process in self.processes.values_mut() {
             if process.state == ProcessState::Running {
                 // Simulate CPU and memory fluctuations
-                use std::time::SystemTime;
-                let seed = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0);
+                // Use kernel uptime as seed to avoid relying on system clock during WASM tick
+                let seed = uptime.wrapping_add(process.start_time as u64);
                 
                 let variation = ((seed % 100) as f64) / 100.0;
                 process.cpu_usage = (process.cpu_usage + variation - 0.5).max(0.1).min(95.0);
-                process.memory_usage = (process.memory_usage as f64 * (1.0 + variation * 0.01 - 0.005)) as u64;
+                
+                // Safe fluctuation of memory usage
+                let mem_factor = 1.0 + variation * 0.01 - 0.005;
+                process.memory_usage = (process.memory_usage as f64 * mem_factor) as u64;
                 
                 // Process stdin if any
                 if !process.stdin_pending.is_empty() {
@@ -372,6 +478,145 @@ impl ProcessManager {
                 }
             }
         }
+    }
+
+
+
+    // ============================================================
+    // Signal handling
+    // ============================================================
+
+    /// Send a signal to a process
+    pub fn send_signal(&mut self, pid: &str, signal: Signal) -> Result<()> {
+        let process = self.processes.get_mut(pid)
+            .ok_or_else(|| KernelError::ProcessNotFound(pid.to_string()))?;
+
+        log::info!("Sending signal {:?} to process {} ({})", signal, pid, process.name);
+
+        // Check if process has a custom handler
+        let signal_num = signal as i32;
+        let action = process.signal_handlers.get(&signal_num)
+            .cloned()
+            .unwrap_or_else(|| signal.default_action());
+
+        match action {
+            SignalAction::Terminate => {
+                process.state = ProcessState::Exited(128 + signal_num);
+                process.exit_code = Some(128 + signal_num);
+                process.end_time = Some(Utc::now().timestamp());
+                process.stdout.push_str(&format!("\nProcess terminated by signal {:?}\n", signal));
+            }
+            SignalAction::Stop => {
+                process.state = ProcessState::Stopped;
+                process.pending_signals.push(signal_num);
+                process.stdout.push_str(&format!("\nProcess stopped by signal {:?}\n", signal));
+            }
+            SignalAction::Continue => {
+                if process.state == ProcessState::Stopped {
+                    process.state = ProcessState::Running;
+                }
+                process.stdout.push_str(&format!("\nProcess continued by signal {:?}\n", signal));
+            }
+            SignalAction::Ignore => {
+                log::debug!("Process {} ignored signal {:?}", pid, signal);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Kill a process with SIGKILL (force kill)
+    pub fn kill_process(&mut self, pid: &str) -> Result<()> {
+        let process = self.processes.get_mut(pid)
+            .ok_or_else(|| KernelError::ProcessNotFound(pid.to_string()))?;
+
+        log::info!("Killing process {} ({})", pid, process.name);
+
+        process.state = ProcessState::Exited(137); // 128 + 9 (SIGKILL)
+        process.exit_code = Some(137);
+        process.end_time = Some(Utc::now().timestamp());
+        process.stdout.push_str("\nProcess killed\n");
+
+        Ok(())
+    }
+
+    /// Set a signal handler for a process
+    pub fn set_signal_handler(&mut self, pid: &str, signal: Signal, action: SignalAction) -> Result<()> {
+        let process = self.processes.get_mut(pid)
+            .ok_or_else(|| KernelError::ProcessNotFound(pid.to_string()))?;
+
+        process.signal_handlers.insert(signal as i32, action);
+        Ok(())
+    }
+
+    // ============================================================
+    // Pipe management
+    // ============================================================
+
+    /// Create a pipe between two processes
+    pub fn create_pipe(&mut self, reader_pid: &str, writer_pid: &str) -> Result<String> {
+        let pipe_id = format!("pipe-{}", self.process_counter);
+        self.process_counter += 1;
+
+        let pipe = Pipe {
+            id: pipe_id.clone(),
+            buffer: Vec::new(),
+            reader_pid: Some(reader_pid.to_string()),
+            writer_pid: Some(writer_pid.to_string()),
+        };
+
+        self.pipes.insert(pipe_id.clone(), pipe);
+
+        // Set pipe_id on both processes
+        if let Some(reader) = self.processes.get_mut(reader_pid) {
+            reader.pipe_id = Some(pipe_id.clone());
+        }
+        if let Some(writer) = self.processes.get_mut(writer_pid) {
+            writer.pipe_id = Some(pipe_id.clone());
+        }
+
+        log::info!("Pipe created: {} ({} -> {})", pipe_id, writer_pid, reader_pid);
+        Ok(pipe_id)
+    }
+
+    /// Write to a pipe
+    pub fn write_to_pipe(&mut self, pipe_id: &str, data: &[u8]) -> Result<()> {
+        let pipe = self.pipes.get_mut(pipe_id)
+            .ok_or_else(|| KernelError::ExecutionError(format!("Pipe not found: {}", pipe_id)))?;
+
+        pipe.buffer.extend_from_slice(data);
+        Ok(())
+    }
+
+    /// Read from a pipe
+    pub fn read_from_pipe(&mut self, pipe_id: &str, max_bytes: usize) -> Result<Vec<u8>> {
+        let pipe = self.pipes.get_mut(pipe_id)
+            .ok_or_else(|| KernelError::ExecutionError(format!("Pipe not found: {}", pipe_id)))?;
+
+        let bytes_to_read = pipe.buffer.len().min(max_bytes);
+        let data = pipe.buffer.drain(..bytes_to_read).collect();
+        Ok(data)
+    }
+
+    /// Close a pipe
+    pub fn close_pipe(&mut self, pipe_id: &str) -> Result<()> {
+        let pipe = self.pipes.remove(pipe_id)
+            .ok_or_else(|| KernelError::ExecutionError(format!("Pipe not found: {}", pipe_id)))?;
+
+        // Clear pipe_id from both processes
+        if let Some(pid) = pipe.reader_pid {
+            if let Some(process) = self.processes.get_mut(&pid) {
+                process.pipe_id = None;
+            }
+        }
+        if let Some(pid) = pipe.writer_pid {
+            if let Some(process) = self.processes.get_mut(&pid) {
+                process.pipe_id = None;
+            }
+        }
+
+        log::info!("Pipe closed: {}", pipe_id);
+        Ok(())
     }
 
     // ============================================================

@@ -5,7 +5,7 @@
 //! pipes, job control, aliases, and shell functions.
 
 use crate::binary_loader::BinaryLoader;
-use crate::error::{KernelError, Result};
+use crate::error::Result;
 use crate::process_manager::ProcessManager;
 use crate::virtual_fs::VirtualFileSystem;
 use std::collections::HashMap;
@@ -38,6 +38,7 @@ pub struct Shell {
     /// Whether we're in the middle of reading multi-line input
     in_continuation: bool,
     /// Continuation prompt (default: "> ")
+    #[allow(dead_code)]
     continuation_prompt: String,
     /// Buffer for multi-line input
     continuation_buffer: String,
@@ -357,7 +358,7 @@ impl Shell {
             "stat",
         ];
 
-        let mut matches: Vec<&str> = commands
+        let matches: Vec<&str> = commands
             .iter()
             .filter(|&&cmd| cmd.starts_with(&input_lower))
             .copied()
@@ -482,7 +483,6 @@ impl Shell {
             "id" => self.cmd_id(),
             "hostname" => format!("{}\n", self.hostname),
             "yes" => self.cmd_yes(&args),
-            "seq" => self.cmd_seq(&args),
             _ => {
                 // Try executing as a binary
                 match processes.execute_binary(loader, vfs, cmd) {
@@ -1509,7 +1509,6 @@ impl Shell {
                 if let Some(path) = self.env.get("PATH") {
                     let mut found = false;
                     for dir in path.split(':') {
-                        let full_path = format!("{}/{}", dir, arg);
                         // Would need to check if file exists in VFS
                         // For now, just show the path
                         output.push_str(&format!("{}/{}\n", dir, arg));
@@ -1645,8 +1644,8 @@ impl Shell {
         &self,
         args: &[&str],
         vfs: &mut VirtualFileSystem,
-        processes: &mut ProcessManager,
-        loader: &BinaryLoader,
+        _processes: &mut ProcessManager,
+        _loader: &BinaryLoader,
     ) -> String {
         if args.is_empty() {
             return "source: missing file operand\n".to_string();
@@ -1715,7 +1714,7 @@ impl Shell {
         }
 
         // For now, just create the files
-        let mut output = String::new();
+        let output = String::new();
         for file in files {
             if append {
                 // Would append in real implementation
@@ -1730,9 +1729,9 @@ impl Shell {
     fn cmd_xargs(
         &self,
         args: &[&str],
-        vfs: &mut VirtualFileSystem,
-        processes: &mut ProcessManager,
-        loader: &BinaryLoader,
+        _vfs: &mut VirtualFileSystem,
+        _processes: &mut ProcessManager,
+        _loader: &BinaryLoader,
     ) -> String {
         if args.is_empty() {
             return "xargs: missing command operand\n".to_string();

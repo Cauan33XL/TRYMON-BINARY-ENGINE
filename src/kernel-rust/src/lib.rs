@@ -25,6 +25,31 @@ pub use kernel_api::*;
 pub use error::*;
 pub use trymon_engine::*;
 
+/// Kernel operational states
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SystemState {
+    /// Booting and initializing subsystems
+    Booting,
+    /// Minimum subsystems ready
+    Ready,
+    /// Fully operational with GUI support
+    Running,
+    /// System is shutting down
+    ShuttingDown,
+    /// System has stopped
+    Halted,
+}
+
+/// Kernel status information for the frontend
+#[derive(serde::Serialize)]
+pub struct SystemInfo {
+    pub state: SystemState,
+    pub uptime: u64,
+    pub boot_logs: Vec<String>,
+    pub memory_usage: u64,
+}
+
+
 // Global kernel state
 static KERNEL: Lazy<Mutex<Option<TrymonKernel>>> = Lazy::new(|| Mutex::new(None));
 
@@ -44,24 +69,40 @@ pub struct TrymonKernel {
     pub config: KernelConfig,
     /// Kernel uptime (seconds)
     pub uptime: u64,
+    /// Current system state
+    pub state: SystemState,
+    /// Boot logs
+    pub boot_logs: Vec<String>,
 }
+
 
 /// Kernel configuration
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KernelConfig {
     /// Maximum memory allocation (MB)
+    #[serde(default = "default_max_memory_mb")]
     pub max_memory_mb: u32,
     /// Enable network access
+    #[serde(default)]
     pub enable_network: bool,
     /// Enable sound emulation
+    #[serde(default)]
     pub enable_sound: bool,
     /// Log level (0-3)
+    #[serde(default = "default_log_level")]
     pub log_level: u8,
     /// Security sandbox enabled
+    #[serde(default = "default_sandbox_enabled")]
     pub sandbox_enabled: bool,
     /// Maximum number of concurrent processes
+    #[serde(default = "default_max_processes")]
     pub max_processes: u32,
 }
+
+fn default_max_memory_mb() -> u32 { 128 }
+fn default_log_level() -> u8 { 1 }
+fn default_sandbox_enabled() -> bool { true }
+fn default_max_processes() -> u32 { 10 }
 
 impl Default for KernelConfig {
     fn default() -> Self {
@@ -87,21 +128,41 @@ impl TrymonKernel {
             engine: TrymonEngine::new(),
             config,
             uptime: 0,
+            state: SystemState::Booting,
+            boot_logs: vec!["[ KERNEL ] Starting Trymon Kernel...".into()],
         }
     }
 
+    /// Add a message to boot logs
+    pub fn log_boot(&mut self, msg: &str) {
+        let log_msg = format!("[ KERNEL ] {}", msg);
+        log::info!("{}", log_msg);
+        self.boot_logs.push(log_msg);
+    }
+
+
     /// Initialize kernel subsystems
     pub fn init(&mut self) -> crate::error::Result<()> {
-        log::info!("TRYMON Kernel initializing...");
+        self.log_boot("Initializing subsystems...");
         
+        self.log_boot("Loading BinaryLoader...");
         self.loader.init()?;
+        
+        self.log_boot("Mounting VirtualFileSystem...");
         self.vfs.init()?;
+        
+        self.log_boot("Starting ProcessManager...");
         self.processes.init()?;
+        
+        self.log_boot("Initializing TrymonEngine...");
         self.engine.init(&mut self.vfs)?;
         
-        log::info!("TRYMON Kernel ready!");
+        self.state = SystemState::Running;
+        self.log_boot("System is RUNNING");
+        
         Ok(())
     }
+
 }
 
 // ============================================================
@@ -256,4 +317,27 @@ pub fn kernel_trymon_run_app(app_id: &str) -> std::result::Result<String, JsValu
     kernel.engine.run_app(&mut kernel.processes, &mut kernel.vfs, app_id)
         .map(|info| serde_json::to_string(&info).unwrap_or_default())
         .map_err(JsValue::from)
+}
+
+/// Export the current VFS state as a JSON string
+#[wasm_bindgen]
+pub fn kernel_export_vfs() -> std::result::Result<String, JsValue> {
+    let k = KERNEL.lock();
+    let kernel = k.as_ref().ok_or_else(|| JsValue::from_str("Kernel not initialized"))?;
+    
+    serde_json::to_string(&kernel.vfs)
+        .map_err(|e| JsValue::from_str(&format!("Failed to export VFS: {}", e)))
+}
+
+/// Import a VFS state from a JSON string
+#[wasm_bindgen]
+pub fn kernel_import_vfs(json: &str) -> std::result::Result<(), JsValue> {
+    let mut k = KERNEL.lock();
+    let kernel = k.as_mut().ok_or_else(|| JsValue::from_str("Kernel not initialized"))?;
+    
+    let vfs: VirtualFileSystem = serde_json::from_str(json)
+        .map_err(|e| JsValue::from_str(&format!("Failed to import VFS: {}", e)))?;
+    
+    kernel.vfs = vfs;
+    Ok(())
 }

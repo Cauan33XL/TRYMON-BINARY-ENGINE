@@ -110,7 +110,7 @@ impl TrymonEngine {
             vfs.extract_binary(&exe_path, &binary_data.data)?;
             
             // Mark as executable
-            if let Some(mut file) = vfs.get_file_mut(&exe_path) {
+            if let Some(file) = vfs.get_file_mut(&exe_path) {
                 file.executable = true;
                 file.permissions = 0o755;
             }

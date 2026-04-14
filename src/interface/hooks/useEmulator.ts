@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { V86Emulator, V86State, V86Config, BinaryFile, ExecutionResult, detectBinaryType } from '../../wasm/v86-emulator';
+import { loadVFS, saveVFS } from '../services/persistence';
 
 export function useEmulator(config: V86Config = {}) {
   const [state, setState] = useState<V86State>({
@@ -35,9 +36,39 @@ export function useEmulator(config: V86Config = {}) {
 
   const initialize = useCallback(async (screenElement?: HTMLCanvasElement) => {
     setState(prev => ({ ...prev, isInitializing: true, error: null }));
-    const result = await emulatorRef.current?.initialize(screenElement) ?? false;
-    setState(prev => ({ ...prev, isInitializing: false }));
-    return result;
+
+    try {
+      const result = await emulatorRef.current?.initialize(screenElement) ?? false;
+
+      if (result) {
+        // Try to restore VFS state from persistence
+        try {
+          const savedVFS = await loadVFS();
+          if (savedVFS) {
+            console.log('Restoring VFS state from persistence...');
+            const imported = emulatorRef.current?.importVFS(savedVFS);
+            if (imported) {
+              console.log('VFS state restored successfully');
+            } else {
+              console.warn('Failed to restore VFS state');
+            }
+          }
+        } catch (e) {
+          console.error('Failed to restore VFS state:', e);
+        }
+      }
+
+      setState(prev => ({ ...prev, isInitializing: false }));
+      return result;
+    } catch (error) {
+      console.error('Initialization failed:', error);
+      setState(prev => ({
+        ...prev,
+        isInitializing: false,
+        error: error instanceof Error ? error.message : 'Initialization failed'
+      }));
+      return false;
+    }
   }, []);
 
   const start = useCallback(() => {
@@ -61,7 +92,7 @@ export function useEmulator(config: V86Config = {}) {
   }, []);
 
   const executeBinary = useCallback((
-    file: BinaryFile, 
+    file: BinaryFile,
     options?: { captureOutput?: boolean; timeout?: number; args?: string[] }
   ): Promise<ExecutionResult> => {
     return emulatorRef.current?.executeBinary(file, options) ?? Promise.resolve({
@@ -93,6 +124,28 @@ export function useEmulator(config: V86Config = {}) {
     return await emulatorRef.current?.installTrymonApp(binaryId) ?? null;
   }, []);
 
+  const saveVFSState = useCallback(async () => {
+    if (!emulatorRef.current) {
+      console.warn('Cannot save VFS: Emulator not initialized');
+      return;
+    }
+
+    const vfsJson = emulatorRef.current?.exportVFS();
+    if (vfsJson) {
+      await saveVFS(vfsJson);
+    } else {
+      console.warn('Cannot save VFS: Export returned null');
+    }
+  }, []);
+
+  const writeFile = useCallback(async (path: string, content: string | Uint8Array) => {
+    return await emulatorRef.current?.writeFile(path, content) ?? false;
+  }, []);
+
+  const createDirectory = useCallback(async (path: string) => {
+    return await emulatorRef.current?.createDirectory(path) ?? false;
+  }, []);
+
   return {
     state,
     emulator: emulatorRef.current,
@@ -106,7 +159,10 @@ export function useEmulator(config: V86Config = {}) {
     executeBinaryBackground,
     listApps,
     runApp,
-    installApp
+    installApp,
+    saveVFSState,
+    writeFile,
+    createDirectory
   };
 }
 
@@ -130,13 +186,13 @@ export function useTerminalOutput(emulator: V86Emulator | null) {
   return { output, clear };
 }
 
-export function useBinaryFiles() {
+export function useBinaryFiles(emulator?: V86Emulator | null) {
   const [files, setFiles] = useState<BinaryFile[]>([]);
 
   const addFile = useCallback(async (file: File) => {
     const arrayBuffer = await file.arrayBuffer();
     const data = new Uint8Array(arrayBuffer);
-    
+
     const type = detectBinaryType(file.name);
     let metadata;
 
@@ -164,15 +220,21 @@ export function useBinaryFiles() {
     };
 
     setFiles(prev => [...prev, binaryFile]);
+
+    // Also register in kernel if emulator is ready
+    if (emulator?.getState().isReady) {
+      emulator.loadBinaryToKernel(binaryFile);
+    }
+
     return binaryFile;
-  }, []);
+  }, [emulator]);
 
   const removeFile = useCallback((id: string) => {
     setFiles(prev => prev.filter(f => f.id !== id));
   }, []);
 
   const updateFileStatus = useCallback((id: string, status: BinaryFile['status'], exitCode?: number) => {
-    setFiles(prev => prev.map(f => 
+    setFiles(prev => prev.map(f =>
       f.id === id ? { ...f, status, exitCode } : f
     ));
   }, []);

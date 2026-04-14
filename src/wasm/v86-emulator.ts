@@ -95,61 +95,82 @@ export class V86Emulator {
     try {
       await this.loadV86Library();
 
+      // Initialize Rust Kernel - wasm-pack handles WASM loading automatically
+      // No need to manually pass the .wasm path
+      await rust.default();
+
+      // Properly await kernel initialization
+      const initResult = rust.api_kernel_init('{}');
+      console.log('Kernel initialization result:', initResult);
+
+      // Verify kernel is actually initialized
+      const status = rust.kernel_status();
+      const statusObj = JSON.parse(status);
+      if (!statusObj.initialized) {
+        throw new Error('Kernel failed to initialize properly');
+      }
+      console.log('Kernel status:', statusObj);
+
       const V86Class = (window as any).V86;
       if (!V86Class) {
         throw new Error('v86 library not loaded');
       }
 
-      const bootModules = await this.loadBootModules();
+      // Standard memory sizes (must be multiples of 4 MB for v86)
+      const memorySize = 128 * 1024 * 1024; // 128 MB
+      const vgaMemorySize = 8 * 1024 * 1024; // 8 MB
 
-      this.emulator = new V86Class({
+      const v86Config: any = {
         wasm_path: this.config.wasmPath,
-        memory_size: this.config.memorySize! * 1024 * 1024,
-        vga_memory_size: this.config.videoMemorySize! * 1024 * 1024,
-        screen_container: screenElement,
-        bios: { url: this.config.biosUrl || '/v86/bios/seabios.bin' },
-        vga_bios: { url: this.config.vgaBiosUrl || '/v86/bios/vgabios.bin' },
-        hda: { url: this.config.hdaUrl },
-        cdrom: { url: this.config.cdromUrl },
-        autostart: this.config.autostart,
-        net_device: { relay_url: '' },
-        log_level: this.config.logLevel,
-        
-        bzimage: bootModules.kernel ? { url: bootModules.kernel } : undefined,
-        initrd: bootModules.initrd ? { url: bootModules.initrd } : undefined,
-        
-        disable_keyboard: false,
-        disable_mouse: false,
-        
-        filesystem: {
+        memory_size: memorySize,
+        vga_memory_size: vgaMemorySize,
+        autostart: false,
+        log_level: 0, // Disable v86 logging
+        disable_keyboard: true,
+        disable_mouse: true,
+
+        // Minimal BIOS configuration
+        bios: { url: '/v86/bios/seabios.bin' },
+        vga_bios: { url: '/v86/bios/vgabios.bin' },
+      };
+
+      // Only add screen if provided
+      if (screenElement) {
+        v86Config.screen_container = screenElement;
+      }
+
+      // Add filesystem and callbacks only in shell mode
+      if (this.state.shellMode) {
+        v86Config.filesystem = {
           baseurl: '/v86/fs',
           readurl: (path: string) => this.handleFileRead(path),
           listdir: (path: string) => this.handleDirList(path)
-        },
-        
-        on_stdout: (data: string) => this.handleStdout(data),
-        on_stderr: (data: string) => this.handleStderr(data),
-        on_serial0_byte: (byte: number) => this.handleSerialByte(byte),
-        on_serial0_line: (line: string) => this.handleSerialLine(line),
-        
-        on_boot: () => this.handleBoot(),
-        onCrashed: (reg: any) => this.handleCrash(reg),
-      });
+        };
 
-      // Initialize Rust Kernel
-      await rust.default('/wasm/pkg/trymon_kernel_rust_bg.wasm');
-      rust.api_kernel_init('{}');
-      
+        v86Config.on_stdout = (data: string) => this.handleStdout(data);
+        v86Config.on_stderr = (data: string) => this.handleStderr(data);
+        v86Config.on_serial0_byte = (byte: number) => this.handleSerialByte(byte);
+        v86Config.on_serial0_line = (line: string) => this.handleSerialLine(line);
+        v86Config.on_boot = () => this.handleBoot();
+        v86Config.onCrashed = (reg: any) => this.handleCrash(reg);
+      }
+
+      console.log('Initializing v86 with config:', Object.keys(v86Config));
+
+      this.emulator = new V86Class(v86Config);
+
       const prompt = rust.api_shell_get_prompt();
       this.handleStdout(prompt);
 
       this.state.isReady = true;
       this.notifyStateChange();
-      
+
       return true;
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'Failed to initialize emulator';
+      this.state.isReady = false;
       this.notifyStateChange();
+      console.error('Emulator initialization failed:', error);
       return false;
     }
   }
@@ -164,7 +185,7 @@ export class V86Emulator {
       this.emulator.run();
       this.state.isRunning = true;
       this.state.uptime = 0;
-      
+
       if (!this.config.autostart) {
         this.bootTimeout = setTimeout(() => {
           this.state.isBooted = true;
@@ -172,13 +193,13 @@ export class V86Emulator {
           this.processExecutionQueue();
         }, this.BOOT_WAIT_TIME);
       }
-      
+
       this.uptimeInterval = setInterval(() => {
         this.state.uptime += 1;
         this.updateResourceUsage();
         this.notifyStateChange();
       }, 1000);
-      
+
       this.notifyStateChange();
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'Failed to start emulator';
@@ -193,7 +214,7 @@ export class V86Emulator {
       this.emulator.stop();
       this.state.isRunning = false;
       this.state.isBooted = false;
-      
+
       if (this.uptimeInterval) {
         clearInterval(this.uptimeInterval);
         this.uptimeInterval = null;
@@ -202,7 +223,7 @@ export class V86Emulator {
         clearTimeout(this.bootTimeout);
         this.bootTimeout = null;
       }
-      
+
       this.notifyStateChange();
     } catch (error) {
       this.state.error = error instanceof Error ? error.message : 'Failed to stop emulator';
@@ -240,31 +261,76 @@ export class V86Emulator {
     }
 
     try {
-      let url: string;
+      let url: string | null = null;
 
       if (file.path) {
-        url = `http://localhost:3001${file.path}`;
+        // Ensure path is a valid URL
+        url = file.path.startsWith('http') ? file.path : `http://localhost:3001${file.path}`;
       } else if (file.data) {
+        // Create blob URL from data
         const blob = new Blob([file.data], { type: 'application/octet-stream' });
         url = URL.createObjectURL(blob);
       } else {
         throw new Error('No data or path provided for binary');
       }
-      
+
+      // Validate URL before passing to emulator
+      if (!url || url.trim() === '') {
+        throw new Error('Invalid URL for binary');
+      }
+
       const mountPath = `/tmp/${file.name}`;
       this.mountedBinaries.set(mountPath, file);
-      
+
+      console.log(`Mounting binary: ${file.name} at ${mountPath} from ${url}`);
+
       if (this.emulator.addFile) {
         this.emulator.addFile(mountPath, url);
       } else if (this.emulator.mount) {
         this.emulator.mount(mountPath, url);
       }
-      
+
       file.status = 'loaded';
       return true;
     } catch (error) {
       file.status = 'error';
       this.state.error = error instanceof Error ? error.message : 'Failed to mount binary';
+      console.error('Failed to mount binary:', error);
+      return false;
+    }
+  }
+
+  async loadBinaryToKernel(file: BinaryFile): Promise<boolean> {
+    if (!file.data) return false;
+    try {
+      const data = new Uint8Array(file.data);
+      const resultJson = rust.kernel_load_binary(file.name, data);
+      const info = JSON.parse(resultJson);
+      console.log('Binary registered in kernel:', info.id);
+      return true;
+    } catch (err) {
+      console.error('Failed to register binary in kernel:', err);
+      return false;
+    }
+  }
+
+  async writeFile(path: string, content: string | Uint8Array): Promise<boolean> {
+    try {
+      const data = typeof content === 'string' ? new TextEncoder().encode(content) : content;
+      rust.api_write_file(path, data);
+      return true;
+    } catch (err) {
+      console.error(`Failed to write file ${path}:`, err);
+      return false;
+    }
+  }
+
+  async createDirectory(path: string): Promise<boolean> {
+    try {
+      rust.api_create_directory(path);
+      return true;
+    } catch (err) {
+      console.error(`Failed to create directory ${path}:`, err);
       return false;
     }
   }
@@ -272,9 +338,9 @@ export class V86Emulator {
   executeCommand(command: string, waitForPrompt: boolean = true): Promise<string> {
     return new Promise((resolve) => {
       this.stdoutBuffer = '';
-      
+
       this.sendInput(command + '\n');
-      
+
       if (!waitForPrompt) {
         resolve('');
         return;
@@ -283,17 +349,17 @@ export class V86Emulator {
       const timeoutMs = 30000;
       const checkInterval = 100;
       let elapsed = 0;
-      
+
       const checkIntervalId = setInterval(() => {
         elapsed += checkInterval;
-        
+
         if (this.PROMPT_REGEX.test(this.stdoutBuffer.trim().slice(-5))) {
           clearInterval(checkIntervalId);
           const output = this.stdoutBuffer;
           this.stdoutBuffer = '';
           resolve(output);
         }
-        
+
         if (elapsed >= timeoutMs) {
           clearInterval(checkIntervalId);
           const output = this.stdoutBuffer;
@@ -305,15 +371,15 @@ export class V86Emulator {
   }
 
   async executeBinary(
-    file: BinaryFile, 
-    options: { 
-      captureOutput?: boolean; 
+    file: BinaryFile,
+    options: {
+      captureOutput?: boolean;
       timeout?: number;
       args?: string[];
     } = {}
   ): Promise<ExecutionResult> {
     const { captureOutput = true, args = [] } = options;
-    
+
     if (!this.state.isBooted) {
       this.executionQueue.push(file.name);
       return { success: false, output: 'System not booted', exitCode: -1, duration: 0 };
@@ -338,6 +404,9 @@ export class V86Emulator {
       case 'rpm':
         command = `rpm -i ${mountPath}`;
         break;
+      case 'trymon':
+        // Trymon packages use the specialized engine
+        return await this.runTrymonApp(file.id);
       default:
         command = `chmod +x ${mountPath} && ./${mountPath} ${args.join(' ')}`;
     }
@@ -348,12 +417,12 @@ export class V86Emulator {
     try {
       const output = await this.executeCommand(command, captureOutput);
       const duration = Date.now() - startTime;
-      
+
       const exitMatch = output.match(/exit\s*code\s*(\d+)/i);
       const exitCode = exitMatch ? parseInt(exitMatch[1]) : 0;
-      
+
       const success = exitCode === 0 && !output.includes('error');
-      
+
       file.status = success ? 'exited' : 'error';
       file.exitCode = exitCode;
       this.notifyStateChange();
@@ -364,11 +433,11 @@ export class V86Emulator {
       file.exitCode = -1;
       this.notifyStateChange();
 
-      return { 
-        success: false, 
-        output: error instanceof Error ? error.message : 'Execution failed', 
-        exitCode: -1, 
-        duration: Date.now() - startTime 
+      return {
+        success: false,
+        output: error instanceof Error ? error.message : 'Execution failed',
+        exitCode: -1,
+        duration: Date.now() - startTime
       };
     }
   }
@@ -423,7 +492,7 @@ export class V86Emulator {
   setShellMode(enabled: boolean): void {
     this.state.shellMode = enabled;
     this.notifyStateChange();
-    
+
     if (enabled) {
       const prompt = rust.api_shell_get_prompt();
       this.handleStdout('\n' + prompt);
@@ -447,7 +516,7 @@ export class V86Emulator {
     try {
       const resultJson = rust.kernel_trymon_run_app(appId);
       const processInfo = JSON.parse(resultJson);
-      
+
       return {
         success: true,
         output: `App started. PID: ${processInfo.pid}`,
@@ -476,6 +545,43 @@ export class V86Emulator {
     }
   }
 
+  exportVFS(): string | null {
+    try {
+      // Check if kernel is initialized before trying to export
+      const status = rust.kernel_status();
+      const statusObj = JSON.parse(status);
+
+      if (!statusObj.initialized) {
+        console.warn('Cannot export VFS: Kernel not initialized');
+        return null;
+      }
+
+      return rust.kernel_export_vfs();
+    } catch (err) {
+      console.error('Failed to export VFS:', err);
+      return null;
+    }
+  }
+
+  importVFS(json: string): boolean {
+    try {
+      // Check if kernel is initialized before trying to import
+      const status = rust.kernel_status();
+      const statusObj = JSON.parse(status);
+
+      if (!statusObj.initialized) {
+        console.warn('Cannot import VFS: Kernel not initialized');
+        return false;
+      }
+
+      rust.kernel_import_vfs(json);
+      return true;
+    } catch (err) {
+      console.error('Failed to import VFS:', err);
+      return false;
+    }
+  }
+
   cleanup(): void {
     this.stop();
     this.emulator = null;
@@ -490,30 +596,13 @@ export class V86Emulator {
         resolve();
         return;
       }
-      
+
       const script = document.createElement('script');
       script.src = '/v86/libv86.js';
       script.onload = () => resolve();
       script.onerror = () => reject(new Error('Failed to load v86 library'));
       document.head.appendChild(script);
     });
-  }
-
-  private async loadBootModules(): Promise<{ kernel?: string; initrd?: string }> {
-    const modules: { kernel?: string; initrd?: string } = {};
-    
-    try {
-      if (this.config.kernelUrl) {
-        modules.kernel = this.config.kernelUrl;
-      }
-      if (this.config.initrdUrl) {
-        modules.initrd = this.config.initrdUrl;
-      }
-    } catch (error) {
-      console.warn('Failed to load boot modules:', error);
-    }
-    
-    return modules;
   }
 
   private handleStdout(data: string): void {
@@ -529,7 +618,7 @@ export class V86Emulator {
   private handleSerialByte(byte: number): void {
     const char = String.fromCharCode(byte);
     this.serialBuffer += char;
-    
+
     if (byte === 10 || byte === 13) {
       this.handleSerialLine(this.serialBuffer);
       this.serialBuffer = '';
@@ -544,11 +633,11 @@ export class V86Emulator {
 
   private handleBoot(): void {
     this.state.isBooted = true;
-    
+
     if (!this.config.autostart) {
       this.executeCommand('echo "TRYMON Binary Engine Ready"');
     }
-    
+
     this.notifyStateChange();
     this.processExecutionQueue();
   }
@@ -586,7 +675,7 @@ export class V86Emulator {
 
     const memoryUsageCalc = (this.state.uptime * 0.3 + 40) % 85;
     this.state.memoryUsage = Math.max(10, Math.min(85, memoryUsageCalc));
-    
+
     if (this.state.isBooted) {
       this.state.cpuUsage = Math.random() * 25 + 5;
     }

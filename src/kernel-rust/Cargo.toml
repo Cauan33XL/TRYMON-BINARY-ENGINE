@@ -59,7 +59,7 @@ futures = "0.3"
 opt-level = "s"      # Optimize for size
 lto = true           # Link-time optimization
 codegen-units = 1    # Better optimization
-panic = "abort"      # Smaller binary size
+panic = "unwind"     # Better error reporting for debugging
 
 [profile.dev]
 opt-level = 0

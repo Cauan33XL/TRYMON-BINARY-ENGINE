@@ -23,7 +23,8 @@ export function BinaryUploader({ onFileUpload, isUploading }: BinaryUploaderProp
     maintainer: '',
     description: '',
     version: '1.0.0',
-    icon: ''
+    icon: '',
+    entry: ''
   });
 
   const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -75,7 +76,12 @@ export function BinaryUploader({ onFileUpload, isUploading }: BinaryUploaderProp
     }
 
     setPendingFile(file);
-    setMetadata(prev => ({ ...prev, name: file.name.split('.')[0] }));
+    const name = file.name.split('.')[0];
+    setMetadata(prev => ({ 
+      ...prev, 
+      name, 
+      entry: name // Default entry point to the name
+    }));
     setShowMetadataForm(true);
   };
 
@@ -169,6 +175,15 @@ export function BinaryUploader({ onFileUpload, isUploading }: BinaryUploaderProp
                 <textarea 
                   value={metadata.description} 
                   onChange={e => setMetadata({...metadata, description: e.target.value})} 
+                />
+              </div>
+              <div className="form-group">
+                <label>Entry Point (Executable)</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. main"
+                  value={metadata.entry} 
+                  onChange={e => setMetadata({...metadata, entry: e.target.value})} 
                 />
               </div>
               <div className="form-group">

@@ -4,9 +4,12 @@ interface LogoProps {
   size?: number;
   className?: string;
   glow?: boolean;
+  animated?: boolean;
 }
 
-const TrymonLogo: React.FC<LogoProps> = ({ size = 32, className = '', glow = true }) => {
+
+const TrymonLogo: React.FC<LogoProps> = ({ size = 32, className = '', glow = true, animated = false }) => {
+
   return (
     <div 
       className={`trymon-logo-container ${className}`} 
@@ -20,15 +23,19 @@ const TrymonLogo: React.FC<LogoProps> = ({ size = 32, className = '', glow = tru
       }}
     >
       {glow && (
-        <div style={{
-          position: 'absolute',
-          width: '100%',
-          height: '100%',
-          background: 'radial-gradient(circle, rgba(0, 242, 255, 0.4) 0%, rgba(0, 112, 243, 0) 70%)',
-          filter: 'blur(8px)',
-          zIndex: 0
-        }} />
+        <div 
+          className={animated ? 'pulse-glow' : ''}
+          style={{
+            position: 'absolute',
+            width: '100%',
+            height: '100%',
+            background: 'radial-gradient(circle, rgba(0, 242, 255, 0.4) 0%, rgba(0, 112, 243, 0) 70%)',
+            filter: 'blur(8px)',
+            zIndex: 0
+          }} 
+        />
       )}
+
       <svg 
         width={size} 
         height={size} 

@@ -1,6 +1,99 @@
 /* @ts-self-types="./trymon_kernel_rust.d.ts" */
 
 /**
+ * Begin a filesystem transaction
+ * @param {string} operation
+ */
+export function api_begin_transaction(operation) {
+    const ptr0 = passStringToWasm0(operation, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    wasm.api_begin_transaction(ptr0, len0);
+}
+
+/**
+ * Check file permissions
+ * @param {string} path
+ * @param {number} uid
+ * @param {number} gid
+ * @param {number} required
+ * @returns {boolean}
+ */
+export function api_check_permissions(path, uid, gid, required) {
+    const ptr0 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.api_check_permissions(ptr0, len0, uid, gid, required);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return ret[0] !== 0;
+}
+
+/**
+ * Commit the current filesystem transaction
+ */
+export function api_commit_transaction() {
+    const ret = wasm.api_commit_transaction();
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
+}
+
+/**
+ * Create a new directory
+ * @param {string} path
+ * @returns {string}
+ */
+export function api_create_directory(path) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.api_create_directory(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * Create a pipe between two processes
+ * @param {string} reader_pid
+ * @param {string} writer_pid
+ * @returns {string}
+ */
+export function api_create_pipe(reader_pid, writer_pid) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(reader_pid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(writer_pid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.api_create_pipe(ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
  * Execute a loaded binary
  * @param {string} binary_id
  * @param {string} _args
@@ -67,6 +160,23 @@ export function api_get_status() {
 }
 
 /**
+ * Get the full system state including boot logs
+ * @returns {string}
+ */
+export function api_get_system_state() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.api_get_system_state();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
  * Initialize kernel with configuration
  * @param {string} config_json
  * @returns {string}
@@ -89,6 +199,19 @@ export function api_kernel_init(config_json) {
         return getStringFromWasm0(ptr2, len2);
     } finally {
         wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * Kill a process immediately
+ * @param {string} pid
+ */
+export function api_kill_process(pid) {
+    const ptr0 = passStringToWasm0(pid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.api_kill_process(ptr0, len0);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
     }
 }
 
@@ -195,6 +318,60 @@ export function api_read_file(path) {
 }
 
 /**
+ * Read data from a pipe
+ * @param {string} pipe_id
+ * @param {number} max_bytes
+ * @returns {Uint8Array}
+ */
+export function api_read_from_pipe(pipe_id, max_bytes) {
+    const ptr0 = passStringToWasm0(pipe_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.api_read_from_pipe(ptr0, len0, max_bytes);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * Resolve a path (handles ./, ../, ~, symlinks)
+ * @param {string} path
+ * @returns {string}
+ */
+export function api_resolve_path(path) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.api_resolve_path(ptr0, len0);
+        var ptr2 = ret[0];
+        var len2 = ret[1];
+        if (ret[3]) {
+            ptr2 = 0; len2 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred3_0 = ptr2;
+        deferred3_1 = len2;
+        return getStringFromWasm0(ptr2, len2);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+
+/**
+ * Rollback the current filesystem transaction
+ */
+export function api_rollback_transaction() {
+    const ret = wasm.api_rollback_transaction();
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
+}
+
+/**
  * Send input to a process
  * @param {string} pid
  * @param {string} input
@@ -205,6 +382,20 @@ export function api_send_input(pid, input) {
     const ptr1 = passStringToWasm0(input, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
     const len1 = WASM_VECTOR_LEN;
     const ret = wasm.api_send_input(ptr0, len0, ptr1, len1);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
+}
+
+/**
+ * Send a signal to a process
+ * @param {string} pid
+ * @param {number} signal_num
+ */
+export function api_send_signal(pid, signal_num) {
+    const ptr0 = passStringToWasm0(pid, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.api_send_signal(ptr0, len0, signal_num);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
@@ -281,6 +472,68 @@ export function api_unmount(path) {
 }
 
 /**
+ * Get VFS statistics
+ * @returns {string}
+ */
+export function api_vfs_stats() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+        const ret = wasm.api_vfs_stats();
+        deferred1_0 = ret[0];
+        deferred1_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+}
+
+/**
+ * Write data to a file (creates if not exists)
+ * @param {string} path
+ * @param {Uint8Array} data
+ * @returns {string}
+ */
+export function api_write_file(path, data) {
+    let deferred4_0;
+    let deferred4_1;
+    try {
+        const ptr0 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.api_write_file(ptr0, len0, ptr1, len1);
+        var ptr3 = ret[0];
+        var len3 = ret[1];
+        if (ret[3]) {
+            ptr3 = 0; len3 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred4_0 = ptr3;
+        deferred4_1 = len3;
+        return getStringFromWasm0(ptr3, len3);
+    } finally {
+        wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+    }
+}
+
+/**
+ * Write data to a pipe
+ * @param {string} pipe_id
+ * @param {Uint8Array} data
+ */
+export function api_write_to_pipe(pipe_id, data) {
+    const ptr0 = passStringToWasm0(pipe_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.api_write_to_pipe(ptr0, len0, ptr1, len1);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
+    }
+}
+
+/**
  * Execute a loaded binary
  * @param {string} binary_id
  * @returns {string}
@@ -307,6 +560,29 @@ export function kernel_execute_binary(binary_id) {
 }
 
 /**
+ * Export the current VFS state as a JSON string
+ * @returns {string}
+ */
+export function kernel_export_vfs() {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ret = wasm.kernel_export_vfs();
+        var ptr1 = ret[0];
+        var len1 = ret[1];
+        if (ret[3]) {
+            ptr1 = 0; len1 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred2_0 = ptr1;
+        deferred2_1 = len1;
+        return getStringFromWasm0(ptr1, len1);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * Get terminal output from a process
  * @param {string} process_id
  * @returns {string}
@@ -323,6 +599,19 @@ export function kernel_get_output(process_id) {
         return getStringFromWasm0(ret[0], ret[1]);
     } finally {
         wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
+ * Import a VFS state from a JSON string
+ * @param {string} json
+ */
+export function kernel_import_vfs(json) {
+    const ptr0 = passStringToWasm0(json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.kernel_import_vfs(ptr0, len0);
+    if (ret[1]) {
+        throw takeFromExternrefTable0(ret[0]);
     }
 }
 
@@ -502,6 +791,15 @@ function __wbg_get_imports() {
         __wbg___wbindgen_throw_6b64449b9b9ed33c: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
+        __wbg_debug_4e190d233ee2e0d8: function(arg0, arg1, arg2, arg3) {
+            console.debug(arg0, arg1, arg2, arg3);
+        },
+        __wbg_error_2001591ad2463697: function(arg0) {
+            console.error(arg0);
+        },
+        __wbg_error_a6a4bb2525a88971: function(arg0, arg1, arg2, arg3) {
+            console.error(arg0, arg1, arg2, arg3);
+        },
         __wbg_getRandomValues_d49329ff89a07af1: function() { return handleError(function (arg0, arg1) {
             globalThis.crypto.getRandomValues(getArrayU8FromWasm0(arg0, arg1));
         }, arguments); },
@@ -513,6 +811,12 @@ function __wbg_get_imports() {
             const ret = arg0.getTimezoneOffset();
             return ret;
         },
+        __wbg_info_e1c3400f7bf783dc: function(arg0, arg1, arg2, arg3) {
+            console.info(arg0, arg1, arg2, arg3);
+        },
+        __wbg_log_465fe3993e4051bf: function(arg0, arg1, arg2, arg3) {
+            console.log(arg0, arg1, arg2, arg3);
+        },
         __wbg_new_0_4d657201ced14de3: function() {
             const ret = new Date();
             return ret;
@@ -520,6 +824,9 @@ function __wbg_get_imports() {
         __wbg_new_7913666fe5070684: function(arg0) {
             const ret = new Date(arg0);
             return ret;
+        },
+        __wbg_warn_ad997e36628bd23a: function(arg0, arg1, arg2, arg3) {
+            console.warn(arg0, arg1, arg2, arg3);
         },
         __wbindgen_cast_0000000000000001: function(arg0) {
             // Cast intrinsic for `F64 -> Externref`.

@@ -1,22 +1,38 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
+export const api_begin_transaction: (a: number, b: number) => void;
+export const api_check_permissions: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+export const api_commit_transaction: () => [number, number];
+export const api_create_directory: (a: number, b: number) => [number, number, number, number];
+export const api_create_pipe: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const api_execute_binary: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const api_get_output: (a: number, b: number) => [number, number];
 export const api_get_status: () => [number, number];
+export const api_get_system_state: () => [number, number];
 export const api_kernel_init: (a: number, b: number) => [number, number, number, number];
+export const api_kill_process: (a: number, b: number) => [number, number];
 export const api_list_dir: (a: number, b: number) => [number, number];
 export const api_list_processes: () => [number, number];
 export const api_load_binary: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const api_mount: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const api_read_file: (a: number, b: number) => [number, number, number, number];
+export const api_read_from_pipe: (a: number, b: number, c: number) => [number, number, number, number];
+export const api_resolve_path: (a: number, b: number) => [number, number, number, number];
+export const api_rollback_transaction: () => [number, number];
 export const api_send_input: (a: number, b: number, c: number, d: number) => [number, number];
+export const api_send_signal: (a: number, b: number, c: number) => [number, number];
 export const api_shell_get_prompt: () => [number, number];
 export const api_shell_input: (a: number, b: number) => [number, number];
 export const api_stop_process: (a: number, b: number) => [number, number];
 export const api_tick: () => void;
 export const api_unmount: (a: number, b: number) => [number, number];
+export const api_vfs_stats: () => [number, number];
+export const api_write_file: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const api_write_to_pipe: (a: number, b: number, c: number, d: number) => [number, number];
 export const kernel_execute_binary: (a: number, b: number) => [number, number, number, number];
+export const kernel_export_vfs: () => [number, number, number, number];
+export const kernel_import_vfs: (a: number, b: number) => [number, number];
 export const kernel_init: () => [number, number];
 export const kernel_load_binary: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const kernel_status: () => [number, number];

@@ -4,19 +4,13 @@
  */
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import * as rust from '@wasm/pkg/trymon_kernel_rust.js';
 
 interface ShellWasmState {
   isReady: boolean;
   isLoading: boolean;
   error: string | null;
 }
-
-declare global {
-  interface Window {
-    trymon_kernel_rust: any;
-  }
-}
-
 
 export function useShellWasm() {
   const [state, setState] = useState<ShellWasmState>({
@@ -26,33 +20,27 @@ export function useShellWasm() {
   });
 
   const wasmLoaded = useRef(false);
-  const kernelRef = useRef<any>(null);
   const outputRef = useRef<string>('TRYMON Shell v1.0.0\nType "help" for available commands.\n\n$ ');
 
   const initialize = useCallback(async () => {
-    if (wasmLoaded.current || kernelRef.current) return;
+    if (wasmLoaded.current) return;
 
     setState(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      // Load WASM using the Vite-configured alias
-      // This allows Vite to properly bundle and process the module
-      const wasmModule = await import('@wasm/pkg/trymon_kernel_rust.js');
-      
-      // Initialize the WASM module if it has a default export (initializer)
-      if (typeof wasmModule.default === 'function') {
-        await wasmModule.default();
+      // Initialize the WASM module (wasm-pack handles WASM loading automatically)
+      if (typeof rust.default === 'function') {
+        await rust.default();
       }
-      
-      kernelRef.current = wasmModule;
+
       wasmLoaded.current = true;
       setState(prev => ({ ...prev, isReady: true, isLoading: false }));
     } catch (error) {
       console.error('Shell WASM Initialization Error:', error);
-      setState(prev => ({ 
-        ...prev, 
-        isLoading: false, 
-        error: error instanceof Error ? error.message : 'Failed to initialize shell' 
+      setState(prev => ({
+        ...prev,
+        isLoading: false,
+        error: error instanceof Error ? error.message : 'Failed to initialize shell'
       }));
     }
   }, []);
@@ -63,13 +51,13 @@ export function useShellWasm() {
   }, [initialize]);
 
   const execute = useCallback(async (command: string): Promise<string> => {
-    if (!kernelRef.current) {
+    if (!wasmLoaded.current) {
       return 'Shell not ready, using fallback mode...\n';
     }
 
     try {
-      if (kernelRef.current.api_shell_input) {
-        const result = kernelRef.current.api_shell_input(command);
+      if (rust.api_shell_input) {
+        const result = rust.api_shell_input(command);
         return result || '';
       }
       return 'Kernel API not available\n';
@@ -79,14 +67,14 @@ export function useShellWasm() {
   }, []);
 
   const sendInput = useCallback((input: string): string => {
-    if (!kernelRef.current) {
+    if (!wasmLoaded.current) {
       outputRef.current += input;
       return input;
     }
 
     try {
-      if (kernelRef.current.api_shell_input) {
-        const result = kernelRef.current.api_shell_input(input);
+      if (rust.api_shell_input) {
+        const result = rust.api_shell_input(input);
         outputRef.current += result || '';
       } else {
         outputRef.current += input;
@@ -110,10 +98,10 @@ export function useShellWasm() {
   }, []);
 
   const getStatus = useCallback(async () => {
-    if (!kernelRef.current) return null;
+    if (!wasmLoaded.current) return null;
     try {
-      if (kernelRef.current.api_get_status) {
-        const status = kernelRef.current.api_get_status();
+      if (rust.api_get_status) {
+        const status = rust.api_get_status();
         return JSON.parse(status);
       }
       return null;
