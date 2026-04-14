@@ -1,12 +1,12 @@
 /**
- * Trash Window Component
+ * Trash Application
  * Shows deleted files/folders with options to restore or permanently delete.
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { Trash2, RotateCcw, XCircle, File, Folder, Clock, AlertTriangle } from 'lucide-react';
-import { listTrashItems, permanentlyDelete, emptyTrash } from '../services/trashService';
-import { notify } from './SystemComponents';
+import { listTrashItems, permanentlyDelete, emptyTrash } from '../../interface/services/trashService';
+import { notify } from '../../interface/components/SystemComponents';
 
 interface TrashItem {
   id: string;
@@ -17,7 +17,7 @@ interface TrashItem {
   deletedAt: number;
 }
 
-export function TrashWindow({ onClose: _onClose }: { onClose?: () => void }) {
+export default function TrashApp({ onClose: _onClose }: { onClose?: () => void }) {
   const [items, setItems] = useState<TrashItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isConfirmingEmpty, setIsConfirmingEmpty] = useState(false);

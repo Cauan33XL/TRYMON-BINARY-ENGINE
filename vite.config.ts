@@ -11,7 +11,6 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util'],
-    include: ['trymon_kernel_rust'],
   },
   build: {
     target: 'esnext',

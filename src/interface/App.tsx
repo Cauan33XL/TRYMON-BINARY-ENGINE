@@ -8,20 +8,28 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import BrowserApp from '../abstract-software-trymon/applications-trymon/BrowserApp';
+import TerminalApp from '../abstract-software-trymon/applications-trymon/TerminalApp';
+import FilesApp from '../abstract-software-trymon/applications-trymon/FilesApp';
+import BinariesApp from '../abstract-software-trymon/applications-trymon/BinariesApp';
+import SettingsApp from '../abstract-software-trymon/applications-trymon/SettingsApp';
+import MonitorApp from '../abstract-software-trymon/applications-trymon/MonitorApp';
+import TrashApp from '../abstract-software-trymon/applications-trymon/TrashApp';
+import SyncApp from '../abstract-software-trymon/applications-trymon/SyncApp';
 import { useEmulator } from './hooks/useEmulator';
 import { useKernelState, useKernelBinaries, useKernelShell, useTrymonApps } from './hooks/useKernelState';
 import { ContextMenu, ContextMenuItem } from './components/ContextMenu';
 import { SystemClock, NotificationCenter, ToastContainer, useNotifications } from './components/SystemComponents';
-import { TrashWindow } from './components/TrashWindow';
 import TrymonLogo from './components/TrymonLogo';
 import BootScreen from './components/BootScreen';
+import { useSync } from './hooks/useSync';
+import { RemoteCursor } from './components/RemoteCursor';
 
 import { saveConfig, loadConfig } from './services/persistence';
 import { getTrashCount } from './services/trashService';
 import * as kernel from './services/kernelService';
-import { Cpu, Terminal, FolderOpen, Settings, Activity, FileCode, X, Minus, Square, Maximize2, Plus, RefreshCw, Info, Image as ImageIcon, Search, Power, User, ChevronRight, Trash2, Package, FileText, FolderPlus } from 'lucide-react';
+import { Globe, Terminal, FolderOpen, Settings, Activity, FileCode, X, Minus, Square, Maximize2, Trash2, Plus, RefreshCw, Info, Image as ImageIcon, Search, Power, User, Package, FileText, FolderPlus, ChevronRight, Share2 } from 'lucide-react';
 import type { BinaryInfo } from './services/kernelService';
-import type { V86State } from '../wasm/v86-emulator';
 
 // App Props no longer used as kernel initializes internally
 
@@ -73,6 +81,9 @@ export default function App() {
   const kernelShell = useKernelShell();
   const trymonApps = useTrymonApps();
 
+  // Sync state
+  const { remoteCursors, broadcast, onEvent, sendTo } = useSync();
+
   // Notifications & UI
   const {
     notifications,
@@ -123,6 +134,19 @@ export default function App() {
     videoMemorySize: 8,
     autostart: false
   });
+
+  // Cursor broadcasting
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      // Throttle broadcast to ~30fps
+      if (Date.now() % 3 === 0) {
+        broadcast('cursor', { x: e.clientX, y: e.clientY });
+      }
+    };
+
+    window.addEventListener('mousemove', handleGlobalMouseMove);
+    return () => window.removeEventListener('mousemove', handleGlobalMouseMove);
+  }, [broadcast]);
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -215,14 +239,14 @@ export default function App() {
 
   // Clock useEffect removed - now handled by memoized SystemClock component
 
-  const openWindow = useCallback((id: string, title: string, icon: React.ReactNode, content: React.ReactNode) => {
+  const openWindow = useCallback((id: string, title: string, icon: React.ReactNode, content: React.ReactNode, options: { broadcast?: boolean } = { broadcast: true }) => {
     const existing = windows.find(w => w.id === id);
     if (existing) {
       if (existing.isMinimized) {
         setWindows(prev => prev.map(w => w.id === id ? { ...w, isMinimized: false } : w));
       }
       setActiveWindowId(id);
-      bringToFront(id);
+      bringToFront(id, options);
       return;
     }
 
@@ -236,24 +260,49 @@ export default function App() {
       isMaximized: false,
       position: { x: 100 + offset, y: 80 + offset },
       size: { width: 900, height: 600 },
-      zIndex: windows.length + 1,
+      zIndex: 500 + windows.length,
       minSize: { width: 400, height: 300 },
       resizable: true
     };
 
     setWindows(prev => [...prev, newWindow]);
     setActiveWindowId(id);
-  }, [windows]);
 
-  const bringToFront = useCallback((id: string) => {
+    if (options.broadcast) {
+      broadcast('window_action', { action: 'open', id, appId: id });
+    }
+  }, [windows, broadcast]);
+
+  const AppRegistry: Record<string, { title: string; icon: any; content: React.ReactNode }> = {
+    'terminal': { title: 'Terminal', icon: <Terminal size={16} />, content: <TerminalApp kernelShell={kernelShell} /> },
+    'files': { title: 'Gerenciador de Arquivos', icon: <FolderOpen size={16} />, content: <FilesApp onUpload={handleUpload} onDelete={handleDelete} onContextMenu={handleContextMenu} /> },
+    'binaries': { title: 'Gerenciador de Binários', icon: <FileCode size={16} />, content: <BinariesApp onUpload={handleUpload} onDelete={handleDelete} onContextMenu={handleContextMenu} onInstall={handleInstall} /> },
+    'settings': { title: 'Configurações do Sistema', icon: <Settings size={16} />, content: <SettingsApp /> },
+    'monitor': { title: 'Monitor do Sistema', icon: <Activity size={16} />, content: <MonitorApp kernelState={kernelState.state} emulatorState={emulatorState} /> },
+    'browser': { title: 'Trymon Browser', icon: <Globe size={16} />, content: <BrowserApp /> },
+    'trash': { title: 'Lixeira', icon: <Trash2 size={16} />, content: <TrashApp /> },
+    'sync': { title: 'Sessão Remota', icon: <Share2 size={16} />, content: <SyncApp /> }
+  };
+
+  const openApp = useCallback((appId: string, options = { broadcast: true }) => {
+    const app = AppRegistry[appId];
+    if (app) {
+      openWindow(appId, app.title, app.icon, app.content, options);
+    }
+  }, [openWindow]);
+
+  const bringToFront = useCallback((id: string, options: { broadcast?: boolean } = { broadcast: true }) => {
     setActiveWindowId(id);
     setWindows(prev => {
       const maxZ = Math.max(...prev.map(w => w.zIndex));
       return prev.map(w => w.id === id ? { ...w, zIndex: maxZ + 1 } : w);
     });
-  }, []);
+    if (options.broadcast) {
+      broadcast('window_action', { action: 'focus', id });
+    }
+  }, [broadcast]);
 
-  const closeWindow = useCallback((id: string) => {
+  const closeWindow = useCallback((id: string, options: { broadcast?: boolean } = { broadcast: true }) => {
     setWindows(prev => prev.filter(w => w.id !== id));
     if (activeWindowId === id) {
       const remaining = windows.filter(w => w.id !== id);
@@ -263,7 +312,10 @@ export default function App() {
         setActiveWindowId(null);
       }
     }
-  }, [activeWindowId, windows]);
+    if (options.broadcast) {
+      broadcast('window_action', { action: 'close', id });
+    }
+  }, [activeWindowId, windows, broadcast]);
 
   const minimizeWindow = useCallback((id: string) => {
     setWindows(prev => prev.map(w => w.id === id ? { ...w, isMinimized: true } : w));
@@ -276,6 +328,103 @@ export default function App() {
       }
     }
   }, [activeWindowId, windows]);
+
+
+  // Desktop icons — derived from kernel state + base system tools
+  const getBaseIcons = useCallback(() => {
+    const GRID_Y = 110;
+    const MARGIN = 20;
+    const icons: DesktopIcon[] = [
+      { id: 'terminal', label: 'Terminal', icon: <Terminal size={32} />, onClick: () => openApp('terminal'), x: MARGIN, y: MARGIN },
+      { id: 'files', label: 'Arquivos', icon: <FolderOpen size={32} />, onClick: () => openApp('files'), x: MARGIN, y: MARGIN + GRID_Y },
+      { id: 'binaries', label: 'Binários', icon: <FileCode size={32} />, onClick: () => openApp('binaries'), x: MARGIN, y: MARGIN + GRID_Y * 2 },
+      { id: 'settings', label: 'Configurações', icon: <Settings size={32} />, onClick: () => openApp('settings'), x: MARGIN, y: MARGIN + GRID_Y * 3 },
+      { id: 'monitor', label: 'Monitor', icon: <Activity size={32} />, onClick: () => openApp('monitor'), x: MARGIN, y: MARGIN + GRID_Y * 4 },
+      { id: 'browser', label: 'Navegador', icon: <Globe size={32} />, onClick: () => openApp('browser'), x: MARGIN, y: MARGIN + GRID_Y * 5 },
+      { id: 'trash', label: 'Lixeira', icon: <Trash2 size={32} />, badge: trashCount > 0 ? trashCount : undefined, onClick: () => openApp('trash'), x: MARGIN, y: MARGIN + GRID_Y * 6 },
+      { id: 'sync', label: 'Sessão Remota', icon: <Share2 size={32} />, onClick: () => openApp('sync'), x: MARGIN, y: MARGIN + GRID_Y * 7 },
+    ];
+
+    // Add installed Trymon apps as desktop icons
+    const apps = trymonApps.apps;
+    for (const app of apps) {
+      icons.push({
+        id: `app-${app.id}`,
+        label: app.name || app.id.slice(0, 8),
+        icon: app.icon ? <img src={app.icon} alt={app.name} style={{ width: 32, height: 32 }} /> : <Package size={32} />,
+        onClick: () => trymonApps.runApp(app.id),
+        x: 140,
+        y: 20 + (GRID_Y * icons.length)
+      });
+    }
+
+    return icons;
+  }, [openWindow, openApp, trymonApps, trashCount]);
+
+  // Handle incoming sync events
+  useEffect(() => {
+    const unsubMove = onEvent('window_move', (payload) => {
+      setWindows(prev => prev.map(w => w.id === payload.id ? { ...w, position: { x: payload.x, y: payload.y } } : w));
+    });
+
+    const unsubResize = onEvent('window_resize', (payload) => {
+      setWindows(prev => prev.map(w => w.id === payload.id ? { ...w, size: payload.size, position: payload.position } : w));
+    });
+
+    const unsubIcon = onEvent('icon_move', (payload) => {
+      setIcons(prev => prev.map(icon => icon.id === payload.id ? { ...icon, x: payload.x, y: payload.y } : icon));
+    });
+
+    const unsubAction = onEvent('window_action', (payload) => {
+      if (payload.action === 'open') {
+        openApp(payload.appId, { broadcast: false });
+      } else if (payload.action === 'close') {
+        closeWindow(payload.id, { broadcast: false });
+      } else if (payload.action === 'focus') {
+        bringToFront(payload.id, { broadcast: false });
+      }
+    });
+
+    const unsubStateReq = onEvent('sys:request_state', (_payload, sender) => {
+      // Host sends current state to requester
+      sendTo(sender, 'sys:initial_state', { 
+        windows: windows.map(w => ({ ...w, content: null })), // Don't send components
+        icons: icons.map(i => ({ ...i, icon: null })) // Don't send icons
+      });
+    });
+
+    const unsubStateInit = onEvent('sys:initial_state', (payload) => {
+      // Guest hydrates state
+      console.log('Hydrating state:', payload);
+      // Re-map contents from registry
+      const hydratedWindows = payload.windows.map((w: any) => {
+        const app = AppRegistry[w.id];
+        return {
+          ...w,
+          title: app?.title || w.title,
+          icon: app?.icon || w.icon,
+          content: app?.content || null
+        };
+      });
+      setWindows(hydratedWindows);
+      
+      const baseIcons = getBaseIcons();
+      const hydratedIcons = payload.icons.map((i: any) => {
+        const base = baseIcons.find(b => b.id === i.id);
+        return { ...i, icon: base?.icon || i.icon, onClick: base?.onClick || (() => {}) };
+      });
+      setIcons(hydratedIcons);
+    });
+
+    return () => {
+      unsubMove();
+      unsubResize();
+      unsubIcon();
+      unsubAction();
+      unsubStateReq();
+      unsubStateInit();
+    };
+  }, [onEvent, closeWindow, bringToFront, openApp, windows, icons, sendTo, getBaseIcons]);
 
   const toggleMinimize = useCallback((id: string) => {
     setWindows(prev => prev.map(w => {
@@ -327,6 +476,7 @@ export default function App() {
 
     setWindows(prev => prev.map(w => {
       if (w.id === draggingWindow && !w.isMaximized) {
+        broadcast('window_move', { id: draggingWindow, x: newX, y: newY });
         return { ...w, position: { x: newX, y: newY } };
       }
       return w;
@@ -396,6 +546,7 @@ export default function App() {
 
     setWindows(prev => prev.map(w => {
       if (w.id === resizingWindow.id) {
+        broadcast('window_resize', { id: resizingWindow.id, size: { width: newWidth, height: newHeight }, position: { x: newX, y: newY } });
         return { ...w, size: { width: newWidth, height: newHeight }, position: { x: newX, y: newY } };
       }
       return w;
@@ -428,35 +579,7 @@ export default function App() {
     stopEmulator();
   }, [stopEmulator]);
 
-  // Desktop icons — derived from kernel state + base system tools
 
-  const getBaseIcons = useCallback(() => {
-    const GRID_Y = 110;
-    const MARGIN = 20;
-    const icons: DesktopIcon[] = [
-      { id: 'terminal', label: 'Terminal', icon: <Terminal size={32} />, onClick: () => openWindow('terminal', 'Terminal', <Terminal size={16} />, <TerminalWindow kernelShell={kernelShell} />), x: MARGIN, y: MARGIN },
-      { id: 'files', label: 'Arquivos', icon: <FolderOpen size={32} />, onClick: () => openWindow('files', 'Gerenciador de Arquivos', <FolderOpen size={16} />, <FilesWindow onUpload={handleUpload} onDelete={handleDelete} onContextMenu={handleContextMenu} />), x: MARGIN, y: MARGIN + GRID_Y },
-      { id: 'binaries', label: 'Binários', icon: <FileCode size={32} />, onClick: () => openWindow('binaries', 'Gerenciador de Binários', <FileCode size={16} />, <BinariesWindow onUpload={handleUpload} onDelete={handleDelete} onContextMenu={handleContextMenu} onInstall={handleInstall} />), x: MARGIN, y: MARGIN + GRID_Y * 2 },
-      { id: 'settings', label: 'Configurações', icon: <Settings size={32} />, onClick: () => openWindow('settings', 'Configurações do Sistema', <Settings size={16} />, <SettingsWindow />), x: MARGIN, y: MARGIN + GRID_Y * 3 },
-      { id: 'monitor', label: 'Monitor', icon: <Activity size={32} />, onClick: () => openWindow('monitor', 'Monitor do Sistema', <Activity size={16} />, <MonitorWindow kernelState={kernelState.state} emulatorState={emulatorState} />), x: MARGIN, y: MARGIN + GRID_Y * 4 },
-      { id: 'trash', label: 'Lixeira', icon: <Trash2 size={32} />, badge: trashCount > 0 ? trashCount : undefined, onClick: () => openWindow('trash', 'Lixeira', <Trash2 size={16} />, <TrashWindow />), x: MARGIN, y: MARGIN + GRID_Y * 5 },
-    ];
-
-    // Add installed Trymon apps as desktop icons
-    const apps = trymonApps.apps;
-    for (const app of apps) {
-      icons.push({
-        id: `app-${app.id}`,
-        label: app.name || app.id.slice(0, 8),
-        icon: app.icon ? <img src={app.icon} alt={app.name} style={{ width: 32, height: 32 }} /> : <Package size={32} />,
-        onClick: () => trymonApps.runApp(app.id),
-        x: 140,
-        y: 20 + (GRID_Y * icons.length)
-      });
-    }
-
-    return icons;
-  }, [openWindow, kernelShell, emulatorState, handleUpload, handleDelete, handleContextMenu, handleInstall, trashCount, trymonApps]);
 
   useEffect(() => {
     // Try to load icons from persistence first
@@ -551,7 +674,10 @@ export default function App() {
 
     setIcons((prev: DesktopIcon[]) => prev.map((icon: DesktopIcon) => {
       if (selectedIconIds.includes(icon.id)) {
-        return { ...icon, x: icon.x + dx, y: icon.y + dy };
+        const nextX = icon.x + dx;
+        const nextY = icon.y + dy;
+        broadcast('icon_move', { id: icon.id, x: nextX, y: nextY });
+        return { ...icon, x: nextX, y: nextY };
       }
       return icon;
     }));
@@ -701,6 +827,7 @@ export default function App() {
 
   const desktopContextMenu: ContextMenuItem[] = [
     { label: 'Abrir Terminal', icon: <Terminal size={14} />, onClick: () => icons.find((i: DesktopIcon) => i.id === 'terminal')?.onClick() },
+    { label: 'Abrir Navegador', icon: <Globe size={14} />, onClick: () => icons.find((i: DesktopIcon) => i.id === 'browser')?.onClick() },
     {
       label: 'Novo Arquivo',
       icon: <Plus size={14} />,
@@ -735,6 +862,11 @@ export default function App() {
         onMouseDown={handleDesktopMouseDown}
         onClick={() => setContextMenu(null)}
       >
+        {/* Desktop Branding (Wallpaper Logo) */}
+        <div className="desktop-branding">
+          <TrymonLogo size={200} glow={true} animated={false} />
+          <div className="branding-text">TRYMON OS</div>
+        </div>
 
         <input
           type="file"
@@ -911,10 +1043,10 @@ export default function App() {
               </div>
 
               <div className="side-actions">
-                <button className="side-btn" onClick={() => openWindow('settings', 'Configurações', <Settings size={16} />, <SettingsWindow />)} title="Configurações">
+                <button className="side-btn" onClick={() => openWindow('settings', 'Configurações', <Settings size={16} />, <SettingsApp />)} title="Configurações">
                   <Settings size={18} />
                 </button>
-                <button className="side-btn" onClick={() => openWindow('files', 'Pastas', <FolderOpen size={16} />, <FilesWindow onUpload={handleUpload} onDelete={handleDelete} onContextMenu={handleContextMenu} />)} title="Arquivos">
+                <button className="side-btn" onClick={() => openWindow('files', 'Pastas', <FolderOpen size={16} />, <FilesApp onUpload={handleUpload} onDelete={handleDelete} onContextMenu={handleContextMenu} />)} title="Arquivos">
                   <FolderOpen size={18} />
                 </button>
                 <div className="spacer" />
@@ -941,7 +1073,7 @@ export default function App() {
                   <h3>Fixados</h3>
                   <div className="apps-grid">
                     {icons.filter((i: DesktopIcon) => i.label.toLowerCase().includes(searchQuery.toLowerCase())).map((icon: DesktopIcon) => (
-                      <div key={icon.id} className="app-item" onClick={() => { icon.onClick(); setStartMenuOpen(false); }}>
+                      <div key={icon.id} className="app-item" onClick={() => { openApp(icon.id); setStartMenuOpen(false); }}>
                         <div className="app-icon">{icon.icon}</div>
                         <span className="app-label">{icon.label}</span>
                       </div>
@@ -1000,417 +1132,12 @@ export default function App() {
           notifications={notifications}
           onRemove={removeNotification}
         />
-      </div>
-    </>
-  );
-}
 
-// ============================================
-// Window Components
-// ============================================
-
-function TerminalWindow({ kernelShell }: { kernelShell: any }) {
-  const [input, setInput] = useState('');
-  const [output, setOutput] = useState<string[]>([
-    '\x1b[1;36mTRYMON Shell v1.0.0\x1b[0m ready.',
-    'Type "help" for available commands.',
-    '',
-    kernelShell.prompt || '\x1b[1;32mroot@trymon:~#\x1b[0m '
-  ]);
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const outputRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
-    }
-  }, [output]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cmd = input.trim();
-    setOutput(prev => [...prev, `\x1b[1;32mroot@trymon:~#\x1b[0m ${cmd}`]);
-    setHistory(prev => [cmd, ...prev]);
-    setHistoryIndex(-1);
-    setInput('');
-
-    if (cmd === '') {
-      setOutput(prev => [...prev, '\x1b[1;32mroot@trymon:~#\x1b[0m ']);
-      return;
-    }
-
-    if (kernelShell?.ready) {
-      const result = kernelShell.sendInput(cmd + '\n');
-      setOutput(prev => [...prev, result || '', '\x1b[1;32mroot@trymon:~#\x1b[0m ']);
-    } else {
-      setOutput(prev => [...prev, `\x1b[1;31mKernel not ready — commands will be queued\x1b[0m`, '\x1b[1;32mroot@trymon:~#\x1b[0m ']);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (history.length > 0) {
-        const newIndex = historyIndex < history.length - 1 ? historyIndex + 1 : historyIndex;
-        setHistoryIndex(newIndex);
-        setInput(history[newIndex] || '');
-      }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (historyIndex > 0) {
-        const newIndex = historyIndex - 1;
-        setHistoryIndex(newIndex);
-        setInput(history[newIndex] || '');
-      } else if (historyIndex === 0) {
-        setHistoryIndex(-1);
-        setInput('');
-      }
-    }
-  };
-
-  return (
-    <div className="terminal-window">
-      <div className="terminal-tabs">
-        <div className="terminal-tab active">
-          <Terminal size={14} />
-          <span>bash</span>
-          <button className="tab-close"><X size={10} /></button>
-        </div>
-        <button className="terminal-tab-add"><Plus size={14} /></button>
-      </div>
-      <div className="terminal-output" ref={outputRef}>
-        {output.map((line, i) => (
-          <div key={i} className="terminal-line" dangerouslySetInnerHTML={{ __html: line }} />
+        {/* Remote Cursors (Trymon Sync) */}
+        {Object.entries(remoteCursors).map(([id, cursor]) => (
+          <RemoteCursor key={id} x={cursor.x} y={cursor.y} name={cursor.name} />
         ))}
       </div>
-      <form onSubmit={handleSubmit} className="terminal-input-line">
-        <span className="prompt">root@trymon:~# </span>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          autoFocus
-        />
-      </form>
-    </div>
-  );
-}
-
-function FilesWindow({ onUpload, onDelete, onContextMenu }: { onUpload: (f: File) => void, onDelete: (id: string) => void, onContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void }) {
-  const [currentPath, setCurrentPath] = useState('/');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const { binaries } = useKernelBinaries();
-
-  return (
-    <div className="files-window">
-      <div className="files-toolbar">
-        <div className="toolbar-left">
-          <button className="toolbar-btn" title="Voltar">←</button>
-          <button className="toolbar-btn" title="Avançar">→</button>
-          <button className="toolbar-btn" title="Atualizar">↻</button>
-          <button className="toolbar-btn" title="Home"><FolderOpen size={14} /></button>
-        </div>
-        <div className="toolbar-center">
-          <input type="text" className="path-input" value={currentPath} onChange={(e) => setCurrentPath(e.target.value)} />
-        </div>
-        <div className="toolbar-right">
-          <button className={`toolbar-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => setViewMode('grid')} title="Grade">▦</button>
-          <button className={`toolbar-btn ${viewMode === 'list' ? 'active' : ''}`} onClick={() => setViewMode('list')} title="Lista">≡</button>
-        </div>
-      </div>
-      <div className="files-sidebar">
-        <div className="sidebar-section">
-          <h4>Locais</h4>
-          <ul>
-            <li className="active"><FolderOpen size={14} /> Arquivos</li>
-            <li><FileCode size={14} /> Downloads</li>
-            <li><FolderOpen size={14} /> Documentos</li>
-          </ul>
-        </div>
-      </div>
-      <div className="files-content">
-        <input type="file" className="file-upload-input" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])} />
-        <div className="files-breadcrumb">
-          <span>Arquivos</span> / <span>Raiz</span>
-        </div>
-        <div className={`files-${viewMode}`}>
-          {binaries.length === 0 ? (
-            <div className="empty-message">
-              <FolderOpen size={48} />
-              <p>Nenhum arquivo</p>
-              <p className="hint">Arraste arquivos aqui ou use o botão acima</p>
-            </div>
-          ) : (
-            binaries.map(f => (
-              <div
-                key={f.id}
-                className="file-item"
-                onContextMenu={(e) => onContextMenu(e, [
-                  { label: 'Abrir', icon: <FolderOpen size={14} />, onClick: () => console.log('Open file') },
-                  { label: 'Baixar', icon: <Plus size={14} />, onClick: () => console.log('Download file') },
-                  { separator: true },
-                  { label: 'Renomear', icon: <FileCode size={14} />, onClick: () => console.log('Rename file') },
-                  { label: 'Excluir', icon: <X size={14} />, danger: true, onClick: () => onDelete(f.id) }
-                ])}
-              >
-                <FileCode size={32} />
-                <span className="file-name">{f.name}</span>
-                <span className="file-size">{(f.size / 1024).toFixed(1)} KB</span>
-                <button className="file-delete" onClick={() => onDelete(f.id)}><X size={14} /></button>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function BinariesWindow({ onUpload, onDelete, onInstall, onContextMenu }: { onUpload: (f: File) => void, onDelete: (id: string) => void, onInstall: (f: BinaryInfo) => void, onContextMenu: (e: React.MouseEvent, items: ContextMenuItem[]) => void }) {
-  const { binaries } = useKernelBinaries();
-  const [activeTab, setActiveTab] = useState<'all' | 'appimage' | 'deb' | 'rpm' | 'Trymon'>('all');
-
-  const filteredBinaries = activeTab === 'all' ? binaries : binaries.filter((b: BinaryInfo) => b.format === activeTab);
-
-  return (
-    <div className="binaries-window">
-      <div className="binaries-toolbar">
-        <div className="binaries-tabs">
-          <button className={`tab ${activeTab === 'all' ? 'active' : ''}`} onClick={() => setActiveTab('all')}>Todos</button>
-          <button className={`tab ${activeTab === 'appimage' ? 'active' : ''}`} onClick={() => setActiveTab('appimage')}>AppImage</button>
-          <button className={`tab ${activeTab === 'deb' ? 'active' : ''}`} onClick={() => setActiveTab('deb')}>DEB</button>
-          <button className={`tab ${activeTab === 'rpm' ? 'active' : ''}`} onClick={() => setActiveTab('rpm')}>RPM</button>
-          <button className={`tab ${activeTab === 'Trymon' ? 'active' : ''}`} onClick={() => setActiveTab('Trymon')}>Trymon</button>
-        </div>
-        <div className="toolbar-right">
-          <label className="upload-btn">
-            <Plus size={14} />
-            <span>Adicionar</span>
-            <input type="file" accept=".appimage,.deb,.rpm,.trymon,.elf" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])} />
-          </label>
-        </div>
-      </div>
-      <div className="binaries-table-container">
-        <table className="binaries-table">
-          <thead>
-            <tr>
-              <th><input type="checkbox" /></th>
-              <th>Nome</th>
-              <th>Tipo</th>
-              <th>Tamanho</th>
-              <th>Status</th>
-              <th>Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredBinaries.length === 0 ? (
-              <tr><td colSpan={6} className="empty-row">Nenhum binário carregado</td></tr>
-            ) : (
-              filteredBinaries.map((f: BinaryInfo) => (
-                <tr
-                  key={f.id}
-                  onContextMenu={(e) => onContextMenu(e, [
-                    ...(f.format === 'Trymon' ? [{ label: 'Instalar Aplicativo', icon: <TrymonLogo size={14} glow={false} />, onClick: () => onInstall(f) }] : []),
-                    { separator: true },
-                    { label: 'Excluir', icon: <X size={14} />, danger: true, onClick: () => onDelete(f.id) }
-                  ])}
-                >
-                  <td><input type="checkbox" /></td>
-                  <td className="file-name-cell">
-                    <FileCode size={16} />
-                    <span>{f.name}</span>
-                  </td>
-                  <td><span className={`type-badge ${f.format.toLowerCase()}`}>{f.format}</span></td>
-                  <td>{(f.size / 1024).toFixed(1)} KB</td>
-                  <td><span className={`status-badge ${typeof f.status === 'string' ? f.status.toLowerCase() : 'ready'}`}>{typeof f.status === 'string' ? f.status : 'Ready'}</span></td>
-                  <td className="actions-cell">
-                    {f.format === 'Trymon' ? (
-                      <button className="action-btn install" onClick={() => onInstall(f)}>📦 Instalar</button>
-                    ) : (
-                      <span className="status-hint">Execute via shell</span>
-                    )}
-                    <button className="action-btn delete" onClick={() => onDelete(f.id)}>🗑</button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function SettingsWindow() {
-  const [activeSection, setActiveSection] = useState('general');
-
-  return (
-    <div className="settings-window">
-      <div className="settings-sidebar">
-        <button className={`settings-nav-item ${activeSection === 'general' ? 'active' : ''}`} onClick={() => setActiveSection('general')}>
-          <Settings size={16} /> Geral
-        </button>
-        <button className={`settings-nav-item ${activeSection === 'network' ? 'active' : ''}`} onClick={() => setActiveSection('network')}>
-          <Activity size={16} /> Rede
-        </button>
-        <button className={`settings-nav-item ${activeSection === 'security' ? 'active' : ''}`} onClick={() => setActiveSection('security')}>
-          <Settings size={16} /> Segurança
-        </button>
-        <button className={`settings-nav-item ${activeSection === 'display' ? 'active' : ''}`} onClick={() => setActiveSection('display')}>
-          <Settings size={16} /> Display
-        </button>
-      </div>
-      <div className="settings-content">
-        {activeSection === 'general' && (
-          <>
-            <div className="settings-section">
-              <h3><Cpu size={16} /> Sistema</h3>
-              <div className="setting-item">
-                <label>Nome do Host</label>
-                <input type="text" defaultValue="trymon" />
-              </div>
-              <div className="setting-item">
-                <label>Memória RAM</label>
-                <select defaultValue="128">
-                  <option value="64">64 MB</option>
-                  <option value="128">128 MB</option>
-                  <option value="256">256 MB</option>
-                  <option value="512">512 MB</option>
-                </select>
-              </div>
-            </div>
-            <div className="settings-section">
-              <h3><Settings size={16} /> Comportamento</h3>
-              <div className="setting-item toggle">
-                <label>Iniciar com o sistema</label>
-                <input type="checkbox" defaultChecked />
-              </div>
-              <div className="setting-item toggle">
-                <label>Mostrar ícones na área de trabalho</label>
-                <input type="checkbox" defaultChecked />
-              </div>
-            </div>
-          </>
-        )}
-        {activeSection === 'network' && (
-          <div className="settings-section">
-            <h3><Activity size={16} /> Configurações de Rede</h3>
-            <div className="setting-item toggle">
-              <label>Habilitar rede</label>
-              <input type="checkbox" defaultChecked />
-            </div>
-            <div className="setting-item">
-              <label>Modo de rede</label>
-              <select defaultValue="user">
-                <option value="user">NAT (Compartilhado)</option>
-                <option value="bridge">Ponte (Bridge)</option>
-                <option value="host">Host-only</option>
-              </select>
-            </div>
-          </div>
-        )}
-        {activeSection === 'security' && (
-          <div className="settings-section">
-            <h3><Settings size={16} /> Segurança</h3>
-            <div className="setting-item toggle">
-              <label>Habilitar sandbox</label>
-              <input type="checkbox" defaultChecked />
-            </div>
-            <div className="setting-item toggle">
-              <label>Bloquear acesso à rede por padrão</label>
-              <input type="checkbox" />
-            </div>
-            <div className="setting-item toggle">
-              <label>Log desystema</label>
-              <input type="checkbox" defaultChecked />
-            </div>
-          </div>
-        )}
-        {activeSection === 'display' && (
-          <div className="settings-section">
-            <h3><Settings size={16} /> Display</h3>
-            <div className="setting-item">
-              <label>Resolução</label>
-              <select defaultValue="1024x768">
-                <option value="800x600">800 x 600</option>
-                <option value="1024x768">1024 x 768</option>
-                <option value="1280x720">1280 x 720</option>
-                <option value="1920x1080">1920 x 1080</option>
-              </select>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function MonitorWindow({ kernelState, emulatorState }: { kernelState: any; emulatorState: V86State }) {
-  const cpuUsage = emulatorState.cpuUsage || 0;
-  const memoryUsage = emulatorState.memoryUsage || 0;
-  const uptime = kernelState.uptime || emulatorState.uptime || 0;
-  const isRunning = emulatorState.isRunning;
-  const kernelReady = kernelState.initialized;
-
-  return (
-    <div className="monitor-window">
-      <div className="monitor-header">
-        <h3>Recursos do Sistema</h3>
-      </div>
-      <div className="monitor-stats">
-        <div className="stat-card">
-          <div className="stat-header">
-            <h4>Uso de CPU</h4>
-            <span className="stat-value">{cpuUsage.toFixed(1)}%</span>
-          </div>
-          <div className="progress-bar">
-            <div className="progress" style={{ width: `${Math.min(cpuUsage, 100)}%` }} />
-          </div>
-          <div className="stat-details">
-            <span>4 núcleos disponíveis</span>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-header">
-            <h4>Memória</h4>
-            <span className="stat-value">{memoryUsage.toFixed(1)}%</span>
-          </div>
-          <div className="progress-bar">
-            <div className="progress memory" style={{ width: `${Math.min(memoryUsage, 100)}%` }} />
-          </div>
-          <div className="stat-details">
-            <span>128 MB total</span>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-header">
-            <h4>Uptime</h4>
-            <span className="stat-value">{Math.floor(uptime / 3600)}h {Math.floor((uptime % 3600) / 60)}m</span>
-          </div>
-          <div className="uptime-chart">
-            <div className="uptime-bar" style={{ width: `${Math.min((uptime % 3600) / 36, 100)}%` }} />
-          </div>
-        </div>
-        <div className="stat-card status-card">
-          <div className="stat-header">
-            <h4>Status do Sistema</h4>
-          </div>
-          <div className="status-indicators">
-            <div className={`status-item ${isRunning ? 'running' : 'stopped'}`}>
-              <span className="status-dot" />
-              <span>Emulador v86</span>
-              <span className="status-text">{isRunning ? 'Executando' : 'Parado'}</span>
-            </div>
-            <div className={`status-item ${kernelReady ? 'running' : 'stopped'}`}>
-              <span className="status-dot" />
-              <span>Kernel Rust</span>
-              <span className="status-text">{kernelReady ? 'Online' : 'Offline'}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    </>
   );
 }

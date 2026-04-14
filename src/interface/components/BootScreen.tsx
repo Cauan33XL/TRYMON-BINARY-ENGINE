@@ -16,7 +16,7 @@ const BootScreen: React.FC<BootScreenProps> = ({ kernelState }) => {
   useEffect(() => {
     if (kernelState.state === 'Booting') {
       const start = Date.now();
-      const totalDuration = 8000;
+      const totalDuration = 5000;
       
       const interval = setInterval(() => {
         const elapsed = Date.now() - start;
@@ -43,7 +43,7 @@ const BootScreen: React.FC<BootScreenProps> = ({ kernelState }) => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsPrePost(false);
-    }, 800);
+    }, 500);
     return () => clearTimeout(timer);
   }, []);
 

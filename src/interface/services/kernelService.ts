@@ -133,13 +133,13 @@ export async function init(): Promise<KernelState> {
     return new Promise((resolve) => {
       let step = 0;
       const stabilization = [
-        { msg: "Probing virtual motherboard... [OK]", delay: 800 },
-        { msg: "Checking system memory layout... (128MB detected)", delay: 1500 },
-        { msg: "Scanning virtual PCI bus artifacts...", delay: 1000 },
-        { msg: "Establishing secure-boot handshake...", delay: 1000 },
-        { msg: "Searching for storage devices... [VFS_READY]", delay: 800 },
-        { msg: "Initializing Trymon WASM Core v4.5.1...", delay: 1200 },
-        { msg: "Loading system shell & user services...", delay: 1700 }
+        { msg: "Probing virtual motherboard... [OK]", delay: 500 },
+        { msg: "Checking system memory layout... (128MB detected)", delay: 950 },
+        { msg: "Scanning virtual PCI bus artifacts...", delay: 625 },
+        { msg: "Establishing secure-boot handshake...", delay: 625 },
+        { msg: "Searching for storage devices... [VFS_READY]", delay: 500 },
+        { msg: "Initializing Trymon WASM Core v4.5.1...", delay: 750 },
+        { msg: "Loading system shell & user services...", delay: 1050 }
       ];
 
       const runStabilization = () => {
@@ -182,6 +182,12 @@ export async function init(): Promise<KernelState> {
           _isInitializing = false;
           _startTickLoop();
           _startAutoSave();
+
+          // Seed Virtual Web Content
+          seedVirtualWeb();
+
+          // Initialize Trymord Backend
+          initTrymordBackend();
 
           // Final notify
           console.log('[KernelService] Notifying callbacks, state:', _kernelState?.state);
@@ -373,6 +379,18 @@ export function readFile(path: string): Uint8Array | null {
   }
 }
 
+export function writeFile(path: string, content: string): boolean {
+  if (!_kernelReady) return false;
+  try {
+    const data = new TextEncoder().encode(content);
+    rust.api_write_file(path, data);
+    return true;
+  } catch (e) {
+    console.error(`[KernelService] Failed to write file ${path}:`, e);
+    return false;
+  }
+}
+
 export function mount(path: string, source: string, fsType: string): void {
   assertReady();
   rust.api_mount(path, source, fsType);
@@ -502,5 +520,102 @@ export function cleanup(): void {
 // ============================================================
 // Direct rust export for advanced usage
 // ============================================================
+
+// ============================================================
+// Virtual Web Seeding
+// ============================================================
+
+function seedVirtualWeb() {
+  console.log('[KernelService] Seeding Virtual Web Content...');
+  
+  // Create /www structure
+  rust.api_shell_input('mkdir -p /www/store /www/social /www/cloud');
+
+  // Trymon Store
+  writeFile('/www/store/index.json', JSON.stringify({
+    title: 'Trymon App Store',
+    hero: 'O marketplace oficial dos melhores binários para o seu sistema.',
+    theme: '#00f2ff',
+    sections: [
+      {
+        title: 'Principais Aplicativos',
+        items: [
+          { id: 'binary_1', name: 'Code Editor Pro', desc: 'Editor de código focado em performance.', icon: 'FileCode', action: 'Install' },
+          { id: 'binary_2', name: 'Video Station', desc: 'Player de mídia universal para o Trymon.', icon: 'Image', action: 'Install' }
+        ]
+      },
+      {
+        title: 'Utilidades',
+        items: [
+          { id: 'util_1', name: 'Network Monitor', desc: 'Acompanhe o tráfego em tempo real.', icon: 'Activity', action: 'Run' },
+          { id: 'util_2', name: 'Disk Cleaner', desc: 'Otimize seu VFS com um clique.', icon: 'Trash2', action: 'Run' }
+        ]
+      }
+    ]
+  }));
+
+  // Trymon Social
+  writeFile('/www/social/index.json', JSON.stringify({
+    title: 'Trymon Connect',
+    hero: 'Onde todos os processos se encontram.',
+    theme: '#7ee787',
+    sections: [
+      {
+        title: 'Novidades do Kernel',
+        items: [
+          { id: 'post_1', name: 'Kernel v4.5 lançado!', desc: 'Melhorias de 20% no VFS e novos drivers.', icon: 'Cpu' },
+          { id: 'post_2', name: 'Novas atualizações de segurança', desc: 'Estamos protegendo seu ambiente WASM.', icon: 'ShieldCheck' }
+        ]
+      }
+    ]
+  }));
+
+  // Trymon Cloud
+  writeFile('/www/cloud/index.json', JSON.stringify({
+    title: 'Trymon Cloud Drive',
+    hero: 'Seus arquivos, em qualquer terminal.',
+    theme: '#ffa657',
+    sections: [
+      {
+        title: 'Arquivos Recentes',
+        items: [
+          { id: 'cloud_1', name: 'backup_system.trymon', desc: 'Salvo há 2 horas.', icon: 'Package' },
+          { id: 'cloud_2', name: 'resume.pdf', desc: 'Salvo com sucesso.', icon: 'FileText' }
+        ]
+      }
+    ]
+  }));
+}
+
+// Trymord Persistence
+export function saveTrymordMessage(message: any) {
+  if (!_kernelReady) return;
+  const history = getTrymordHistory();
+  history.push(message);
+  writeFile('/var/log/trymord/history.json', JSON.stringify(history));
+}
+
+export function getTrymordHistory(): any[] {
+  if (!_kernelReady) return [];
+  const content = readFile('/var/log/trymord/history.json');
+  if (!content) return [];
+  try {
+    return JSON.parse(new TextDecoder().decode(content));
+  } catch {
+    return [];
+  }
+}
+
+function initTrymordBackend() {
+  console.log('[KernelService] Initializing Trymord Backend...');
+  rust.api_shell_input('mkdir -p /var/log/trymord');
+  if (!readFile('/var/log/trymord/history.json')) {
+    const initialHistory = [
+      { user: 'Trymon AI', avatar: 'AI', text: 'Bem-vindo ao servidor oficial Trymon Kernel! Sinta-se em casa.', time: '10:30' },
+      { user: 'Root', avatar: 'R', text: 'Alguém testou o novo carregador de binários?', time: '11:05' }
+    ];
+    writeFile('/var/log/trymord/history.json', JSON.stringify(initialHistory));
+  }
+}
 
 export { rust };

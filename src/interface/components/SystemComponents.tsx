@@ -34,7 +34,7 @@ export const SystemClock = memo(function SystemClock() {
   }, [time]);
 
   return (
-    <div className="system-clock" title={dateStr}>
+    <div className="system-clock clock" title={dateStr}>
       <span className="clock-time">{timeStr}</span>
     </div>
   );

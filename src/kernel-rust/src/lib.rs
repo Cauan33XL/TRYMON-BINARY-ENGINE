@@ -43,9 +43,13 @@ pub enum SystemState {
 /// Kernel status information for the frontend
 #[derive(serde::Serialize)]
 pub struct SystemInfo {
+    /// Current state of the system
     pub state: SystemState,
+    /// System uptime in seconds
     pub uptime: u64,
+    /// Collection of boot logs
     pub boot_logs: Vec<String>,
+    /// Current memory usage in bytes
     pub memory_usage: u64,
 }
 

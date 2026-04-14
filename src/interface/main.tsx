@@ -4,13 +4,17 @@ import App from './App';
 import './style.css';
 import * as kernel from './services/kernelService';
 
+import { SyncProvider } from './hooks/useSync';
+
 const rootElement = document.getElementById('root')!;
 
 // Mount the App immediately. 
 // The App will handle kernel initialization within its own lifecycle.
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <App />
+    <SyncProvider>
+      <App />
+    </SyncProvider>
   </React.StrictMode>
 );
 
