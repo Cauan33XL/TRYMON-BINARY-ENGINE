@@ -48,6 +48,12 @@ export default function BrowserApp() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [fullHistory, setFullHistory] = useState<HistoryItem[]>([]);
 
+  // Recursion Depth Detection (Global to OS)
+  const currentLayer = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    return parseInt(params.get('layer') || '0', 10);
+  }, []);
+
   const activeTab = useMemo(() => tabs.find(t => t.id === activeTabId) || tabs[0], [tabs, activeTabId]);
 
   // Load Persistence
@@ -123,10 +129,11 @@ export default function BrowserApp() {
     setTabs(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
   };
 
-  const navigateTo = useCallback((newUrl: string, addToHistory = true) => {
+  const navigateTo = useCallback((newUrl: string, addToHistory = true, tabId?: string) => {
     let formattedUrl = newUrl.trim();
     if (!formattedUrl) return;
 
+    const targetId = tabId || activeTabId;
     const looksLikeUrl = formattedUrl.includes('.') && !formattedUrl.includes(' ');
     const isInternal = formattedUrl.startsWith('trymon://');
     const hasProtocol = formattedUrl.startsWith('http://') || formattedUrl.startsWith('https://');
@@ -139,7 +146,7 @@ export default function BrowserApp() {
       }
     }
 
-    const currentTab = tabs.find(t => t.id === activeTabId);
+    const currentTab = tabs.find(t => t.id === targetId);
     if (!currentTab) return;
 
     let newHistory = currentTab.history;
@@ -159,7 +166,7 @@ export default function BrowserApp() {
       saveHistory([historyItem, ...fullHistory].slice(0, 50));
     }
 
-    updateTab(activeTabId, {
+    updateTab(targetId, {
       url: formattedUrl,
       inputUrl: formattedUrl,
       history: newHistory,
@@ -169,7 +176,7 @@ export default function BrowserApp() {
     });
 
     setTimeout(() => {
-      updateTab(activeTabId, { isLoading: false });
+      updateTab(targetId, { isLoading: false });
     }, 800);
   }, [tabs, activeTabId, fullHistory]);
 
@@ -204,36 +211,6 @@ export default function BrowserApp() {
     } else {
       saveBookmarks([...bookmarks, { title: activeTab.title, url: activeTab.url }]);
     }
-  };
-
-  const renderContent = () => {
-    const url = activeTab.url;
-    if (url === 'trymon://home') return <BrowserHomepage navigateTo={navigateTo} />;
-    if (url.startsWith('trymon://search')) return <TrymonSERP url={url} navigateTo={navigateTo} />;
-    if (url === 'trymon://ai') return <TrymonAI />;
-    if (url === 'trymon://docs') return <TrymonDocs />;
-    if (url === 'trymon://trymord') return <TrymordWebsite />;
-
-    if (url.startsWith('trymon://')) {
-      const siteName = url.replace('trymon://', '').split('?')[0];
-      const filePath = `/www/${siteName}/index.json`;
-      const content = kernel.readFile(filePath);
-      if (content) {
-        try {
-          const json = JSON.parse(new TextDecoder().decode(content));
-          return <VirtualSiteRenderer navigateTo={navigateTo} data={json} />;
-        } catch (e) { return <div>Error: Invalid Site JSON</div>; }
-      }
-    }
-
-    return (
-      <iframe
-        src={url}
-        className="browser-iframe"
-        title="Browser Content"
-        sandbox="allow-scripts allow-same-origin allow-forms"
-      />
-    );
   };
 
   return (
@@ -290,6 +267,12 @@ export default function BrowserApp() {
         </div>
 
         <div className="browser-nav-group">
+          {currentLayer > 0 && (
+            <div className={`recursion-badge ${currentLayer >= 4 ? 'recursion-warning' : ''}`}>
+              <RotateCw size={10} />
+              Layer {currentLayer}/5
+            </div>
+          )}
           <button className="browser-nav-btn" onClick={() => navigateTo('trymon://ai')} title="Resumir com Trymon AI">
             <Sparkles size={18} color="var(--accent-cyan)" />
           </button>
@@ -341,20 +324,83 @@ export default function BrowserApp() {
         </div>
 
         <div className="browser-content">
-          {activeTab.isLoading && (
-            <div className="loading-bar-container">
-              <div className={`loading-bar active`} style={{ width: '100%' }} />
+          {tabs.map(tab => (
+            <div 
+              key={tab.id} 
+              className={`tab-viewport ${tab.id === activeTabId ? 'active' : ''}`}
+            >
+              {tab.isLoading && (
+                <div className="loading-bar-container">
+                  <div className={`loading-bar active`} style={{ width: '100%' }} />
+                </div>
+              )}
+              <TabRenderer 
+                tab={tab} 
+                navigateTo={(url: string, hist?: boolean) => navigateTo(url, hist, tab.id)} 
+                currentLayer={currentLayer}
+              />
             </div>
-          )}
-          {renderContent()}
+          ))}
         </div>
       </div>
     </div>
   );
 }
 
-function BrowserHomepage({ navigateTo }: { navigateTo: (url: string) => void }) {
+function TabRenderer({ tab, navigateTo, currentLayer }: { tab: Tab, navigateTo: any, currentLayer: number }) {
+  const url = tab.url;
+
+  if (url === 'trymon://home') {
+    return <BrowserHomepage navigateTo={navigateTo} currentLayer={currentLayer} />;
+  }
+  
+  if (url.startsWith('trymon://search')) {
+    return <TrymonSERP url={url} navigateTo={navigateTo} />;
+  }
+
+  if (url === 'trymon://ai') return <TrymonAI />;
+  if (url === 'trymon://docs') return <TrymonDocs />;
+  if (url === 'trymon://trymord') return <TrymordWebsite />;
+
+  if (url.startsWith('trymon://')) {
+    const siteName = url.replace('trymon://', '').split('?')[0];
+    const filePath = `/www/${siteName}/index.json`;
+    const content = kernel.readFile(filePath);
+    if (content) {
+      try {
+        const json = JSON.parse(new TextDecoder().decode(content));
+        return <VirtualSiteRenderer navigateTo={navigateTo} data={json} />;
+      } catch (e) { return <div>Error: Invalid Site JSON</div>; }
+    }
+  }
+
+  return (
+    <iframe
+      src={url}
+      className="browser-iframe"
+      title={`Browser Tab ${tab.id}`}
+      sandbox="allow-scripts allow-same-origin allow-forms"
+    />
+  );
+}
+
+function BrowserHomepage({ navigateTo, currentLayer }: { navigateTo: (url: string) => void, currentLayer: number }) {
   const [query, setQuery] = useState('');
+  
+  const handleRecursiveNav = (url: string) => {
+    if (url.includes('trymon-binary-engine.vercel.app')) {
+      if (currentLayer >= 5) {
+        alert("CRITICAL ERROR: Maximum recursion depth reached (5/5). System stability at risk. Future layers blocked.");
+        return;
+      }
+      const nextLayer = currentLayer + 1;
+      const recursiveUrl = `${url}?layer=${nextLayer}`;
+      navigateTo(recursiveUrl);
+    } else {
+      navigateTo(url);
+    }
+  };
+
   return (
     <div className="browser-homepage">
       <div className="hp-logo">
@@ -385,7 +431,7 @@ function BrowserHomepage({ navigateTo }: { navigateTo: (url: string) => void }) 
           { name: 'Trymon Docs', url: 'trymon://docs', icon: <Info size={24} />, premium: true },
           { name: 'Trymon OS', url: 'https://trymon-binary-engine.vercel.app/', icon: <RotateCw size={24} color="#00f2ff" />, premium: true },
         ].map((sc, i) => (
-          <div key={i} className={`hp-shortcut ${sc.premium ? 'premium-border' : ''}`} onClick={() => navigateTo(sc.url)}>
+          <div key={i} className={`hp-shortcut ${sc.premium ? 'premium-border' : ''}`} onClick={() => handleRecursiveNav(sc.url)}>
             <div className="hp-shortcut-icon">{sc.icon}</div>
             <span>{sc.name}</span>
           </div>

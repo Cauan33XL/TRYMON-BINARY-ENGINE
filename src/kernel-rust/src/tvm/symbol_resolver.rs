@@ -4,31 +4,48 @@
 
 use std::collections::HashMap;
 
+/// Represents a symbol in an ELF binary
 #[derive(Debug, Clone)]
 pub struct Symbol {
+    /// Name of the symbol
     pub name: String,
+    /// Memory address of the symbol
     pub address: u64,
+    /// Size of the symbol in bytes
     pub size: u64,
+    /// Symbol binding (Local, Global, Weak)
     pub binding: SymbolBinding,
+    /// Symbol type (Function, Object, etc.)
     pub symbol_type: SymbolType,
 }
 
+/// ELF symbol binding types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolBinding {
+    /// Local symbol
     Local,
+    /// Global symbol
     Global,
+    /// Weak symbol
     Weak,
 }
 
+/// ELF symbol types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolType {
+    /// No specified type
     Notype,
+    /// Data object
     Object,
+    /// Executable function
     Function,
+    /// Section symbol
     Section,
+    /// File symbol
     File,
 }
 
+/// A table of symbols indexed by name and address
 #[derive(Debug, Clone)]
 pub struct SymbolTable {
     symbols: HashMap<String, Symbol>,
@@ -36,6 +53,7 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
+    /// Create a new empty symbol table
     pub fn new() -> Self {
         Self {
             symbols: HashMap::new(),
@@ -43,19 +61,23 @@ impl SymbolTable {
         }
     }
 
+    /// Insert a symbol into the table
     pub fn insert(&mut self, symbol: Symbol) {
         self.symbols.insert(symbol.name.clone(), symbol.clone());
         self.addresses.insert(symbol.address, symbol.name);
     }
 
+    /// Get a symbol by its name
     pub fn get_by_name(&self, name: &str) -> Option<&Symbol> {
         self.symbols.get(name)
     }
 
+    /// Get a symbol name by its address
     pub fn get_by_address(&self, addr: u64) -> Option<&String> {
         self.addresses.get(&addr)
     }
 
+    /// Get the number of symbols in the table
     pub fn len(&self) -> usize {
         self.symbols.len()
     }
@@ -67,13 +89,18 @@ impl Default for SymbolTable {
     }
 }
 
+/// Represents an entry in the Procedure Linkage Table
 #[derive(Debug, Clone)]
 pub struct PLTEntry {
+    /// Address of the PLT stub
     pub address: u64,
+    /// Name of the symbol being resolved
     pub name: String,
+    /// Address in the Global Offset Table
     pub got_address: u64,
 }
 
+/// Resolver for PLT and GOT entries
 pub struct PLTResolver {
     plt_entries: Vec<PLTEntry>,
     got_entries: HashMap<u64, String>,
@@ -81,6 +108,7 @@ pub struct PLTResolver {
 }
 
 impl PLTResolver {
+    /// Create a new empty PLT resolver
     pub fn new() -> Self {
         Self {
             plt_entries: Vec::new(),
@@ -89,6 +117,7 @@ impl PLTResolver {
         }
     }
 
+    /// Add a new PLT entry to the resolver
     pub fn add_plt_entry(&mut self, address: u64, name: String, got_address: u64) {
         self.plt_entries.push(PLTEntry {
             address,
@@ -98,18 +127,22 @@ impl PLTResolver {
         self.got_entries.insert(got_address, name);
     }
 
+    /// Resolve a symbol to a specific stub ID
     pub fn resolve_symbol(&mut self, name: &str, stub_id: usize) {
         self.resolved_stubs.insert(name.to_string(), stub_id);
     }
 
+    /// Get a PLT entry by its address
     pub fn get_plt_entry(&self, address: u64) -> Option<&PLTEntry> {
         self.plt_entries.iter().find(|e| e.address == address)
     }
 
+    /// Get the symbol name associated with a GOT address
     pub fn get_got_name(&self, got_addr: u64) -> Option<&String> {
         self.got_entries.get(&got_addr)
     }
 
+    /// Check if a symbol has been resolved
     pub fn is_resolved(&self, name: &str) -> bool {
         self.resolved_stubs.contains_key(name)
     }
@@ -121,20 +154,29 @@ impl Default for PLTResolver {
     }
 }
 
+/// Implementation types for LibC functions
 #[derive(Debug, Clone)]
 pub enum LibcImpl {
+    /// Implemented via a syscall
     Syscall(u32),
+    /// Implemented via a custom Rust function
     Custom(fn(&[u32]) -> i32),
+    /// Unimplemented stub
     Stub,
 }
 
+/// Metadata about an emulated LibC function
 #[derive(Debug, Clone)]
 pub struct LibcFunction {
+    /// Name of the function (e.g., "printf")
     pub name: String,
+    /// Associated Linux syscall number, if any
     pub syscall_number: Option<u32>,
+    /// Implementation details
     pub implementation: LibcImpl,
 }
 
+/// Main resolver for all symbols and library functions
 pub struct SymbolResolver {
     symbol_table: SymbolTable,
     plt_resolver: PLTResolver,
@@ -145,6 +187,7 @@ pub struct SymbolResolver {
 type ResolverCallback = fn(&[u32]) -> i32;
 
 impl SymbolResolver {
+    /// Create a new SymbolResolver and initialize common LibC functions
     pub fn new() -> Self {
         let mut resolver = Self {
             symbol_table: SymbolTable::new(),
@@ -219,10 +262,12 @@ impl SymbolResolver {
         }
     }
 
+    /// Register a custom resolver for a symbol
     pub fn register_resolver(&mut self, name: String, callback: ResolverCallback) {
         self.custom_resolvers.insert(name, callback);
     }
 
+    /// Resolve a symbol by name to its LibC implementation
     pub fn resolve(&self, name: &str) -> Option<&LibcFunction> {
         self.libc_functions.get(name).or_else(|| {
             self.custom_resolvers.get(name).map(|_| {
@@ -236,6 +281,7 @@ impl SymbolResolver {
         })
     }
 
+    /// Check if a given address corresponds to a PLT entry
     pub fn is_plt_entry(&self, addr: u64) -> bool {
         self.plt_resolver.get_plt_entry(addr).is_some()
     }

@@ -9,6 +9,7 @@ use super::disassembler::{translate_to_tvm, DecodedInstruction, Disassembler};
 use super::symbol_resolver::SymbolResolver;
 use std::collections::HashMap;
 
+/// Handles the creation of .trymon packages from ELF data
 pub struct Packager {
     metadata: PackageMetadata,
     required_syscalls: Vec<u32>,
@@ -18,6 +19,7 @@ pub struct Packager {
 }
 
 impl Packager {
+    /// Create a new Packager with associated metadata
     pub fn new(metadata: PackageMetadata) -> Self {
         Self {
             metadata,
@@ -28,22 +30,26 @@ impl Packager {
         }
     }
 
+    /// Add a required syscall number to the package
     pub fn add_syscall(&mut self, syscall: u32) {
         if !self.required_syscalls.contains(&syscall) {
             self.required_syscalls.push(syscall);
         }
     }
 
+    /// Add an emulated library name to the package requirements
     pub fn add_emulated_lib(&mut self, lib: &str) {
         if !self.emulated_libs.contains(&lib.to_string()) {
             self.emulated_libs.push(lib.to_string());
         }
     }
 
+    /// Set embedded data (assets, etc.) for the package
     pub fn set_embedded_data(&mut self, data: Vec<u8>) {
         self.embedded_data = data;
     }
 
+    /// Translate x86_64 ELF code to TVM bytecode
     pub fn translate_elf(&mut self, elf_data: &[u8]) -> Result<(), String> {
         let mut disasm = Disassembler::new(elf_data.to_vec(), 0);
         let instructions = disasm.decode_all();
@@ -62,6 +68,7 @@ impl Packager {
         Ok(())
     }
 
+    /// Build the final TVM package
     pub fn build(&self) -> CompileResult {
         let mut instructions = Vec::new();
 
@@ -103,6 +110,7 @@ impl Packager {
         }
     }
 
+    /// Perform heuristic analysis on ELF data to identify dependencies
     pub fn analyze_elf(&mut self, elf_data: &[u8]) {
         // Analyze which syscalls are needed
         let needed_syscalls = vec![
@@ -126,6 +134,7 @@ impl Packager {
         }
     }
 
+    /// Generate a JSON representation of the package metadata
     pub fn get_metadata_json(&self) -> String {
         let mut json = String::new();
         json.push_str("{");
@@ -169,6 +178,7 @@ impl Packager {
     }
 }
 
+/// Convenience function to package an ELF file into TVM bytecode
 pub fn package_elf(elf_data: &[u8], metadata: PackageMetadata) -> CompileResult {
     let mut packager = Packager::new(metadata);
 
@@ -181,6 +191,7 @@ pub fn package_elf(elf_data: &[u8], metadata: PackageMetadata) -> CompileResult 
     packager.build()
 }
 
+/// Extract shared library dependencies from an ELF file
 pub fn extract_dependencies(elf_data: &[u8]) -> HashMap<String, Vec<String>> {
     let mut deps = HashMap::new();
 

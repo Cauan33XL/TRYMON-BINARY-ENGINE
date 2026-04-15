@@ -512,13 +512,21 @@ impl Syscall {
 /// Linux open flags
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenFlags {
+    /// Open for reading only
     ReadOnly = 0x0,
+    /// Open for writing only
     WriteOnly = 0x1,
+    /// Open for both reading and writing
     ReadWrite = 0x2,
+    /// Append to the file instead of overwriting
     Append = 0x200,
+    /// Create the file if it does not exist
     Create = 0x40,
+    /// Fail if the file already exists (with Create)
     Exclusive = 0x80,
+    /// Truncate the file to zero length if it exists
     Truncate = 0x400,
+    /// Open in non-blocking mode
     NonBlock = 0x800,
 }
 
@@ -623,10 +631,12 @@ pub trait SyscallHandler: Send + Sync {
 
 /// Default syscall handler implementation
 pub struct DefaultSyscallHandler {
+    /// The syscall context (VFS state, process info, etc.)
     pub context: SyscallContext,
 }
 
 impl DefaultSyscallHandler {
+    /// Create a new DefaultSyscallHandler and initialize standard file descriptors
     pub fn new() -> Self {
         let mut ctx = SyscallContext::default();
         ctx.init_stdio();

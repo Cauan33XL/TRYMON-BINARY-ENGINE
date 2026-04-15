@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+/// Emulates common standard C library functions within the TVM environment
 pub struct LibcEmulator {
     heap: Vec<u8>,
     heap_top: usize,
@@ -11,6 +12,7 @@ pub struct LibcEmulator {
 }
 
 impl LibcEmulator {
+    /// Create a new LibcEmulator with a 1MB initial heap
     pub fn new() -> Self {
         Self {
             heap: Vec::with_capacity(1024 * 1024),
@@ -19,6 +21,7 @@ impl LibcEmulator {
         }
     }
 
+    /// Emulate libc malloc
     pub fn malloc(&mut self, size: usize) -> usize {
         if size == 0 {
             return 0;
@@ -33,6 +36,7 @@ impl LibcEmulator {
         ptr
     }
 
+    /// Emulate libc free
     pub fn free(&mut self, ptr: usize) {
         if ptr == 0 {
             return;
@@ -42,11 +46,13 @@ impl LibcEmulator {
         log::debug!("TVM libc: free(0x{:x})", ptr);
     }
 
+    /// Emulate libc calloc
     pub fn calloc(&mut self, nmemb: usize, size: usize) -> usize {
         let total = nmemb * size;
         self.malloc(total)
     }
 
+    /// Emulate libc realloc
     pub fn realloc(&mut self, ptr: usize, new_size: usize) -> usize {
         if ptr == 0 {
             return self.malloc(new_size);
@@ -69,6 +75,7 @@ impl LibcEmulator {
         new_ptr
     }
 
+    /// Emulate libc memcpy
     pub fn memcpy(&mut self, dest: usize, src: usize, n: usize) -> usize {
         log::debug!(
             "TVM libc: memcpy(dest=0x{:x}, src=0x{:x}, n={})",
@@ -79,11 +86,13 @@ impl LibcEmulator {
         dest
     }
 
+    /// Emulate libc memset
     pub fn memset(&mut self, s: usize, c: i32, n: usize) -> usize {
         log::debug!("TVM libc: memset(s=0x{:x}, c={}, n={})", s, c, n);
         s
     }
 
+    /// Emulate libc memmove
     pub fn memmove(&mut self, dest: usize, src: usize, n: usize) -> usize {
         log::debug!(
             "TVM libc: memmove(dest=0x{:x}, src=0x{:x}, n={})",
@@ -94,11 +103,13 @@ impl LibcEmulator {
         dest
     }
 
+    /// Emulate libc memcmp
     pub fn memcmp(&mut self, s1: usize, s2: usize, n: usize) -> i32 {
         log::debug!("TVM libc: memcmp(s1=0x{:x}, s2=0x{:x}, n={})", s1, s2, n);
         0
     }
 
+    /// Emulate libc strlen
     pub fn strlen(&self, s: usize) -> usize {
         if s == 0 {
             return 0;
@@ -110,11 +121,13 @@ impl LibcEmulator {
         len
     }
 
+    /// Emulate libc strcpy
     pub fn strcpy(&self, dest: usize, src: usize) -> usize {
         log::debug!("TVM libc: strcpy(dest=0x{:x}, src=0x{:x})", dest, src);
         dest
     }
 
+    /// Emulate libc strncpy
     pub fn strncpy(&self, dest: usize, src: usize, n: usize) -> usize {
         log::debug!(
             "TVM libc: strncpy(dest=0x{:x}, src=0x{:x}, n={})",
@@ -125,21 +138,25 @@ impl LibcEmulator {
         dest
     }
 
+    /// Emulate libc strcmp
     pub fn strcmp(&self, s1: usize, s2: usize) -> i32 {
         log::debug!("TVM libc: strcmp(s1=0x{:x}, s2=0x{:x})", s1, s2);
         0
     }
 
+    /// Emulate libc strncmp
     pub fn strncmp(&self, s1: usize, s2: usize, n: usize) -> i32 {
         log::debug!("TVM libc: strncmp(s1=0x{:x}, s2=0x{:x}, n={})", s1, s2, n);
         0
     }
 
+    /// Emulate libc strcat
     pub fn strcat(&self, dest: usize, src: usize) -> usize {
         log::debug!("TVM libc: strcat(dest=0x{:x}, src=0x{:x})", dest, src);
         dest
     }
 
+    /// Emulate libc strncat
     pub fn strncat(&self, dest: usize, src: usize, n: usize) -> usize {
         log::debug!(
             "TVM libc: strncat(dest=0x{:x}, src=0x{:x}, n={})",
@@ -150,11 +167,13 @@ impl LibcEmulator {
         dest
     }
 
+    /// Emulate libc strchr
     pub fn strchr(&self, s: usize, c: i32) -> usize {
         log::debug!("TVM libc: strchr(s=0x{:x}, c={})", s, c);
         0
     }
 
+    /// Emulate libc strstr
     pub fn strstr(&self, haystack: usize, needle: usize) -> usize {
         log::debug!(
             "TVM libc: strstr(haystack=0x{:x}, needle=0x{:x})",
@@ -164,11 +183,13 @@ impl LibcEmulator {
         0
     }
 
+    /// Emulate libc sprintf
     pub fn sprintf(&self, buf: usize, format: usize, _args: usize) -> i32 {
         log::debug!("TVM libc: sprintf(buf=0x{:x}, format=0x{:x})", buf, format);
         0
     }
 
+    /// Emulate libc snprintf
     pub fn snprintf(&self, buf: usize, size: usize, format: usize, _args: usize) -> i32 {
         log::debug!(
             "TVM libc: snprintf(buf=0x{:x}, size={}, format=0x{:x})",
@@ -179,6 +200,7 @@ impl LibcEmulator {
         0
     }
 
+    /// Emulate libc printf
     pub fn printf(&self, format: usize, _args: usize) -> i32 {
         log::debug!("TVM libc: printf(format=0x{:x})", format);
         0
@@ -191,15 +213,18 @@ impl Default for LibcEmulator {
     }
 }
 
+/// Helper for formatting C-style strings
 pub struct StringFormatter {
     buffer: Vec<u8>,
 }
 
 impl StringFormatter {
+    /// Create a new StringFormatter
     pub fn new() -> Self {
         Self { buffer: Vec::new() }
     }
 
+    /// Format a string with the given arguments
     pub fn format(&mut self, format: &str, args: &[u32]) -> Vec<u8> {
         self.buffer.clear();
 

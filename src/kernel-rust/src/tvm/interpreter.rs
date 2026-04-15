@@ -37,6 +37,7 @@ pub struct ExecutionResult {
 }
 
 impl ExecutionResult {
+    /// Create a successful execution result
     pub fn success(exit_code: i32, stats: ExecutionStats) -> Self {
         Self {
             success: true,
@@ -48,6 +49,7 @@ impl ExecutionResult {
         }
     }
 
+    /// Create an error execution result
     pub fn error(msg: String) -> Self {
         Self {
             success: false,
@@ -236,8 +238,11 @@ impl Interpreter {
 /// Interpreter statistics
 #[derive(Debug, Clone, Default)]
 pub struct InterpreterStats {
+    /// Total number of loaded bytecode packages
     pub loaded_packages: usize,
+    /// Number of active VM instances
     pub active_vms: usize,
+    /// Maximum allowed concurrent executions
     pub max_concurrent: usize,
 }
 
@@ -245,6 +250,7 @@ pub struct InterpreterStats {
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 
+/// Global TVM interpreter instance for the current process
 pub static INTERPRETER: Lazy<Mutex<Interpreter>> = Lazy::new(|| Mutex::new(Interpreter::new()));
 
 /// Check if TVM is initialized

@@ -315,31 +315,32 @@ export default function App() {
 
   // Desktop icons — derived from kernel state + base system tools
   const getBaseIcons = useCallback(() => {
+    const GRID_X = 100;
     const GRID_Y = 110;
     const MARGIN = 20;
     const icons: DesktopIcon[] = [
       { id: 'terminal', label: 'Terminal', icon: <Terminal size={32} />, onClick: () => openApp('terminal'), x: MARGIN, y: MARGIN },
+      { id: 'trash', label: 'Lixeira', icon: <Trash2 size={32} />, badge: trashCount > 0 ? trashCount : undefined, onClick: () => openApp('trash'), x: MARGIN + GRID_X, y: MARGIN },
+      { id: 'binaries', label: 'Binários', icon: <FileCode size={32} />, onClick: () => openApp('binaries'), x: MARGIN + GRID_X * 2, y: MARGIN },
+      { id: 'monitor', label: 'Monitor', icon: <Activity size={32} />, onClick: () => openApp('monitor'), x: MARGIN + GRID_X * 3, y: MARGIN },
       { id: 'files', label: 'Arquivos', icon: <FolderOpen size={32} />, onClick: () => openApp('files'), x: MARGIN, y: MARGIN + GRID_Y },
-      { id: 'binaries', label: 'Binários', icon: <FileCode size={32} />, onClick: () => openApp('binaries'), x: MARGIN, y: MARGIN + GRID_Y * 2 },
-      { id: 'settings', label: 'Configurações', icon: <Settings size={32} />, onClick: () => openApp('settings'), x: MARGIN, y: MARGIN + GRID_Y * 3 },
-      { id: 'monitor', label: 'Monitor', icon: <Activity size={32} />, onClick: () => openApp('monitor'), x: MARGIN, y: MARGIN + GRID_Y * 4 },
-      { id: 'browser', label: 'Navegador', icon: <Globe size={32} />, onClick: () => openApp('browser'), x: MARGIN, y: MARGIN + GRID_Y * 5 },
-      { id: 'trash', label: 'Lixeira', icon: <Trash2 size={32} />, badge: trashCount > 0 ? trashCount : undefined, onClick: () => openApp('trash'), x: MARGIN, y: MARGIN + GRID_Y * 6 },
-      { id: 'sync', label: 'Sessão Remota', icon: <Share2 size={32} />, onClick: () => openApp('sync'), x: MARGIN, y: MARGIN + GRID_Y * 7 },
+      { id: 'browser', label: 'Navegador', icon: <Globe size={32} />, onClick: () => openApp('browser'), x: MARGIN + GRID_X, y: MARGIN + GRID_Y },
+      { id: 'sync', label: 'Sessão Remota', icon: <Share2 size={32} />, onClick: () => openApp('sync'), x: MARGIN + GRID_X * 2, y: MARGIN + GRID_Y },
+      { id: 'settings', label: 'Configurações', icon: <Settings size={32} />, onClick: () => openApp('settings'), x: MARGIN + GRID_X * 3, y: MARGIN + GRID_Y },
     ];
 
     // Add installed Trymon apps as desktop icons
     const apps = trymonApps.apps;
-    for (const app of apps) {
+    apps.forEach((app, index) => {
       icons.push({
         id: `app-${app.id}`,
         label: app.name || app.id.slice(0, 8),
         icon: app.icon ? <img src={app.icon} alt={app.name} style={{ width: 32, height: 32 }} /> : <Package size={32} />,
         onClick: () => trymonApps.runApp(app.id),
-        x: 140,
-        y: 20 + (GRID_Y * icons.length)
+        x: MARGIN + (GRID_X * (index % 4)),
+        y: MARGIN + (GRID_Y * (Math.floor(index / 4) + 2)) // Starting from row 3
       });
-    }
+    });
 
     return icons;
   }, [openWindow, openApp, trymonApps, trashCount]);
@@ -610,11 +611,7 @@ export default function App() {
         return restoredIcons;
       }
 
-      return baseIcons.map((base: any, index: number) => ({
-        ...base,
-        x: MARGIN,
-        y: MARGIN + (GRID_Y * index)
-      }));
+      return baseIcons;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kernelState.initialized, getBaseIcons]);

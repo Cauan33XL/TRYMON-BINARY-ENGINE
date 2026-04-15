@@ -6,46 +6,174 @@ use super::bytecode::Opcode;
 
 #[derive(Debug, Clone)]
 pub enum X86Instruction {
-    MovRR { dst: u8, src: u8 },
-    MovRI { dst: u8, imm: u64 },
-    MovRM { dst: u8, addr: u64 },
-    MovMR { addr: u64, src: u8 },
-    Push { reg: u8 },
-    Pop { reg: u8 },
-    AddRR { dst: u8, src: u8 },
-    SubRR { dst: u8, src: u8 },
-    MulRR { dst: u8, src: u8 },
-    DivR { reg: u8 },
-    AndRR { dst: u8, src: u8 },
-    OrRR { dst: u8, src: u8 },
-    XorRR { dst: u8, src: u8 },
-    CmpRR { a: u8, b: u8 },
-    TestRR { a: u8, b: u8 },
-    Jmp { offset: i32 },
-    Jz { offset: i32 },
-    Jnz { offset: i32 },
-    Jg { offset: i32 },
-    Jl { offset: i32 },
-    Call { offset: i32 },
+    /// Move register to register
+    MovRR { 
+        /// Destination register
+        dst: u8, 
+        /// Source register
+        src: u8 
+    },
+    /// Move immediate to register
+    MovRI { 
+        /// Destination register
+        dst: u8, 
+        /// Immediate value
+        imm: u64 
+    },
+    /// Move memory to register
+    MovRM { 
+        /// Destination register
+        dst: u8, 
+        /// Memory address
+        addr: u64 
+    },
+    /// Move register to memory
+    MovMR { 
+        /// Memory address
+        addr: u64, 
+        /// Source register
+        src: u8 
+    },
+    /// Push register onto stack
+    Push { 
+        /// Register to push
+        reg: u8 
+    },
+    /// Pop register from stack
+    Pop { 
+        /// Register to pop into
+        reg: u8 
+    },
+    /// Add register to register
+    AddRR { 
+        /// Destination register
+        dst: u8, 
+        /// Source register
+        src: u8 
+    },
+    /// Subtract register from register
+    SubRR { 
+        /// Destination register
+        dst: u8, 
+        /// Source register
+        src: u8 
+    },
+    /// Multiply register by register
+    MulRR { 
+        /// Destination register
+        dst: u8, 
+        /// Source register
+        src: u8 
+    },
+    /// Divide by register
+    DivR { 
+        /// Register to divide by
+        reg: u8 
+    },
+    /// Bitwise AND register with register
+    AndRR { 
+        /// Destination register
+        dst: u8, 
+        /// Source register
+        src: u8 
+    },
+    /// Bitwise OR register with register
+    OrRR { 
+        /// Destination register
+        dst: u8, 
+        /// Source register
+        src: u8 
+    },
+    /// Bitwise XOR register with register
+    XorRR { 
+        /// Destination register
+        dst: u8, 
+        /// Source register
+        src: u8 
+    },
+    /// Compare register with register
+    CmpRR { 
+        /// First value
+        a: u8, 
+        /// Second value
+        b: u8 
+    },
+    /// Test register with register (bitwise AND that updates flags)
+    TestRR { 
+        /// First value
+        a: u8, 
+        /// Second value
+        b: u8 
+    },
+    /// Unconditional jump
+    Jmp { 
+        /// Jump offset
+        offset: i32 
+    },
+    /// Jump if zero (equal)
+    Jz { 
+        /// Jump offset
+        offset: i32 
+    },
+    /// Jump if not zero (not equal)
+    Jnz { 
+        /// Jump offset
+        offset: i32 
+    },
+    /// Jump if greater
+    Jg { 
+        /// Jump offset
+        offset: i32 
+    },
+    /// Jump if less
+    Jl { 
+        /// Jump offset
+        offset: i32 
+    },
+    /// Procedure call
+    Call { 
+        /// Call offset
+        offset: i32 
+    },
+    /// Return from procedure
     Ret,
+    /// System call
     Syscall,
-    Lea { dst: u8, addr: u64 },
+    /// Load effective address
+    Lea { 
+        /// Destination register
+        dst: u8, 
+        /// Address expression
+        addr: u64 
+    },
+    /// Move string byte
     Movsb,
+    /// Move string word
     Movsw,
+    /// Move string doubleword
     Movsd,
+    /// Move string quadword
     Movsq,
+    /// No operation
     Nop,
+    /// Halt execution
     Hlt,
+    /// Unknown or unsupported instruction
     Unknown(Vec<u8>),
 }
 
+/// A decoded x86 instruction with its length and original address
 #[derive(Debug, Clone)]
 pub struct DecodedInstruction {
+    /// The decoded opcode and operands
     pub opcode: X86Instruction,
+    /// Length of the instruction in bytes
     pub length: usize,
+    /// Original memory address of the instruction
     pub address: u64,
 }
 
+/// x86_64 Disassembler state
 pub struct Disassembler {
     position: usize,
     data: Vec<u8>,
@@ -53,6 +181,7 @@ pub struct Disassembler {
 }
 
 impl Disassembler {
+    /// Create a new disassembler for the given data and base address
     pub fn new(data: Vec<u8>, base_address: u64) -> Self {
         Self {
             position: 0,
@@ -61,6 +190,7 @@ impl Disassembler {
         }
     }
 
+    /// Decode all instructions in the data
     pub fn decode_all(&mut self) -> Vec<DecodedInstruction> {
         let mut instructions = Vec::new();
 
@@ -74,6 +204,7 @@ impl Disassembler {
         instructions
     }
 
+    /// Decode a single instruction at the current position
     pub fn decode_one(&mut self) -> Option<DecodedInstruction> {
         if self.position >= self.data.len() {
             return None;
@@ -475,6 +606,7 @@ impl Disassembler {
     }
 }
 
+/// Translate a decoded instruction to TVM bytecode
 pub fn translate_to_tvm(inst: &DecodedInstruction) -> Vec<u8> {
     let mut ops = Vec::new();
 
