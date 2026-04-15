@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
+
 use std::path::PathBuf;
 
 const SQUASHFS_MAGIC: u32 = 0x68737173; // "hsqs" in little-endian
@@ -87,7 +87,7 @@ impl AppImageExtractor {
             let squashfs_data = &self.data[self.squashfs_offset as usize..];
 
             if squashfs_data.len() >= 96 {
-                let block_size = u32::from_le_bytes([
+                let _block_size = u32::from_le_bytes([
                     squashfs_data[24],
                     squashfs_data[25],
                     squashfs_data[26],

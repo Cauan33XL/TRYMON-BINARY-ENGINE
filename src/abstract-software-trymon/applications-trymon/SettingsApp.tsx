@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Settings, Activity, Cpu } from 'lucide-react';
+import { Settings, Activity, Cpu, User } from 'lucide-react';
 
-export default function SettingsApp() {
+export default function SettingsApp({ userName, onUserNameChange }: { userName: string; onUserNameChange: (name: string) => void }) {
   const [activeSection, setActiveSection] = useState('general');
 
   return (
@@ -9,6 +9,9 @@ export default function SettingsApp() {
       <div className="settings-sidebar">
         <button className={`settings-nav-item ${activeSection === 'general' ? 'active' : ''}`} onClick={() => setActiveSection('general')}>
           <Settings size={16} /> Geral
+        </button>
+        <button className={`settings-nav-item ${activeSection === 'profile' ? 'active' : ''}`} onClick={() => setActiveSection('profile')}>
+          <User size={16} /> Perfil
         </button>
         <button className={`settings-nav-item ${activeSection === 'network' ? 'active' : ''}`} onClick={() => setActiveSection('network')}>
           <Activity size={16} /> Rede
@@ -51,6 +54,37 @@ export default function SettingsApp() {
               </div>
             </div>
           </>
+        )}
+        {activeSection === 'profile' && (
+          <div className="settings-section">
+            <h3><User size={16} /> Perfil do Usuário</h3>
+            <div className="setting-item">
+              <label>Nome de Usuário</label>
+              <input 
+                type="text" 
+                value={userName} 
+                onChange={(e) => onUserNameChange(e.target.value)}
+                placeholder="Ex: root, admin, user"
+              />
+            </div>
+            <div className="setting-item">
+              <label>Avatar</label>
+              <div className="avatar-placeholder" style={{ 
+                width: '64px', 
+                height: '64px', 
+                borderRadius: '50%', 
+                background: 'var(--accent-cyan, #00f2ff)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '24px',
+                color: '#000',
+                fontWeight: 'bold'
+              }}>
+                {userName.charAt(0).toUpperCase()}
+              </div>
+            </div>
+          </div>
         )}
         {activeSection === 'network' && (
           <div className="settings-section">

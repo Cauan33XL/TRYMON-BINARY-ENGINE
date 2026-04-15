@@ -16,8 +16,9 @@ import SettingsApp from '../abstract-software-trymon/applications-trymon/Setting
 import MonitorApp from '../abstract-software-trymon/applications-trymon/MonitorApp';
 import TrashApp from '../abstract-software-trymon/applications-trymon/TrashApp';
 import SyncApp from '../abstract-software-trymon/applications-trymon/SyncApp';
+import EditorApp from '../abstract-software-trymon/applications-trymon/EditorApp';
 import { useEmulator } from './hooks/useEmulator';
-import { useKernelState, useKernelBinaries, useKernelShell, useTrymonApps } from './hooks/useKernelState';
+import { useKernelState, useKernelBinaries, useTrymonApps } from './hooks/useKernelState';
 import { ContextMenu, ContextMenuItem } from './components/ContextMenu';
 import { SystemClock, NotificationCenter, ToastContainer, useNotifications } from './components/SystemComponents';
 import TrymonLogo from './components/TrymonLogo';
@@ -28,7 +29,7 @@ import { RemoteCursor } from './components/RemoteCursor';
 import { saveConfig, loadConfig } from './services/persistence';
 import { getTrashCount } from './services/trashService';
 import * as kernel from './services/kernelService';
-import { Globe, Terminal, FolderOpen, Settings, Activity, FileCode, X, Minus, Square, Maximize2, Trash2, Plus, RefreshCw, Info, Image as ImageIcon, Search, Power, User, Package, FileText, FolderPlus, ChevronRight, Share2 } from 'lucide-react';
+import { Globe, Terminal, FolderOpen, Settings, Activity, FileCode, X, Minus, Square, Maximize2, Trash2, Plus, RefreshCw, Info, Image as ImageIcon, Search, Power, User, Package, FileText, FolderPlus, ChevronRight, Share2, Edit3 } from 'lucide-react';
 
 
 // App Props no longer used as kernel initializes internally
@@ -65,6 +66,8 @@ interface DesktopIcon {
   x: number;
   y: number;
   badge?: number;
+  path?: string; // VFS path for files
+  isEditing?: boolean;
 }
 
 // Legacy BootScreen removed - replaced by components/BootScreen.tsx
@@ -78,7 +81,6 @@ export default function App() {
   // Kernel state — single source of truth
   const kernelState = useKernelState();
   const binaries = useKernelBinaries();
-  const kernelShell = useKernelShell();
   const trymonApps = useTrymonApps();
 
   // Sync state
@@ -127,6 +129,15 @@ export default function App() {
   const emulatorHook = useEmulator({});
   const emulatorState = emulatorHook.state;
 
+  const [userName, setUserName] = useState<string>(
+    loadConfig<string>('username') || 'trymon'
+  );
+
+  const handleUserNameChange = useCallback((name: string) => {
+    setUserName(name);
+    saveConfig('username', name);
+  }, []);
+
   // Cursor broadcasting
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
@@ -142,12 +153,6 @@ export default function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Binary upload — delegates to kernel (used by FilesApp)
-  const handleUpload = useCallback(async (file: File) => {
-    const data = new Uint8Array(await file.arrayBuffer());
-    kernel.loadBinary(file.name, data);
-    setTimeout(() => kernel.saveVFSState(), 500);
-  }, []);
 
   // Binary delete — delegates to kernel
   const handleDelete = useCallback((binaryId: string) => {
@@ -159,6 +164,13 @@ export default function App() {
   // Desktop icons state
   const [icons, setIcons] = useState<DesktopIcon[]>([]);
   const [trashCount, setTrashCount] = useState(0);
+
+  // Initialize Standard Filesystem for User
+  useEffect(() => {
+    if (kernelState.initialized) {
+      kernel.ensureUserHome(userName);
+    }
+  }, [kernelState.initialized, userName]);
 
   // Refresh trash count periodically
   useEffect(() => {
@@ -173,54 +185,37 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleCreateNewFile = useCallback(async (extension: string) => {
-    const name = prompt(`Nome do novo arquivo (${extension}):`, `novo_arquivo`);
-    if (!name) return;
-
-    const fileName = name.endsWith(extension) ? name : `${name}${extension}`;
-    const desktopPath = `/home/trymon/Desktop/${fileName}`;
-
-    // For now just log — VFS file creation will be added to kernel API
-    console.log(`Creating file: ${desktopPath}`);
-    const newIcon: DesktopIcon = {
-      id: `file-${crypto.randomUUID()}`,
-      label: fileName,
-      icon: extension === '.txt' ? <FileText size={32} /> :
-        extension === '.md' ? <FileText size={32} color="#0070f3" /> :
-          extension === '.trymon' ? <Package size={32} color="#00f2ff" /> :
-            <FileCode size={32} />,
-      onClick: () => console.log(`Opening ${fileName}`),
-      x: 20,
-      y: 20
-    };
-    setIcons(prev => [...prev, newIcon]);
-    kernel.saveVFSState();
-  }, []);
-
-  const handleCreateNewFolder = useCallback(async () => {
-    const name = prompt('Nome da nova pasta:', 'Nova Pasta');
-    if (!name) return;
-
-    console.log(`Creating folder: ${name}`);
-    const newIcon: DesktopIcon = {
-      id: `folder-${crypto.randomUUID()}`,
-      label: name,
-      icon: <FolderOpen size={32} />,
-      onClick: () => console.log(`Opening folder ${name}`),
-      x: 20,
-      y: 20
-    };
-    setIcons(prev => [...prev, newIcon]);
-    kernel.saveVFSState();
-  }, []);
-
   const handleContextMenu = useCallback((e: React.MouseEvent, items: ContextMenuItem[]) => {
     e.preventDefault();
     e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, items });
   }, []);
 
-  // Clock useEffect removed - now handled by memoized SystemClock component
+  const bringToFront = useCallback((id: string, options: { broadcast?: boolean } = { broadcast: true }) => {
+    setActiveWindowId(id);
+    setWindows(prev => {
+      const maxZ = Math.max(...prev.map(w => w.zIndex));
+      return prev.map(w => w.id === id ? { ...w, zIndex: maxZ + 1 } : w);
+    });
+    if (options.broadcast) {
+      broadcast('window_action', { action: 'focus', id });
+    }
+  }, [broadcast]);
+
+  const closeWindow = useCallback((id: string, options: { broadcast?: boolean } = { broadcast: true }) => {
+    setWindows(prev => prev.filter(w => w.id !== id));
+    if (activeWindowId === id) {
+      const remaining = windows.filter(w => w.id !== id);
+      if (remaining.length > 0) {
+        setActiveWindowId(remaining[remaining.length - 1].id);
+      } else {
+        setActiveWindowId(null);
+      }
+    }
+    if (options.broadcast) {
+      broadcast('window_action', { action: 'close', id });
+    }
+  }, [activeWindowId, windows, broadcast]);
 
   const openWindow = useCallback((id: string, title: string, icon: React.ReactNode, content: React.ReactNode, options: { broadcast?: boolean } = { broadcast: true }) => {
     const existing = windows.find(w => w.id === id);
@@ -254,18 +249,8 @@ export default function App() {
     if (options.broadcast) {
       broadcast('window_action', { action: 'open', id, appId: id });
     }
-  }, [windows, broadcast]);
+  }, [windows, broadcast, bringToFront]);
 
-  const AppRegistry: Record<string, { title: string; icon: any; content: React.ReactNode }> = {
-    'terminal': { title: 'Terminal', icon: <Terminal size={16} />, content: <TerminalApp kernelShell={kernelShell} /> },
-    'files': { title: 'Gerenciador de Arquivos', icon: <FolderOpen size={16} />, content: <FilesApp onUpload={handleUpload} onDelete={handleDelete} onContextMenu={handleContextMenu} /> },
-    'binaries': { title: 'Gerenciador de Binários', icon: <FileCode size={16} />, content: <BinariesApp onDelete={handleDelete} onContextMenu={handleContextMenu} /> },
-    'settings': { title: 'Configurações do Sistema', icon: <Settings size={16} />, content: <SettingsApp /> },
-    'monitor': { title: 'Monitor do Sistema', icon: <Activity size={16} />, content: <MonitorApp kernelState={kernelState.state} emulatorState={emulatorState} /> },
-    'browser': { title: 'Trymon Browser', icon: <Globe size={16} />, content: <BrowserApp /> },
-    'trash': { title: 'Lixeira', icon: <Trash2 size={16} />, content: <TrashApp /> },
-    'sync': { title: 'Sessão Remota', icon: <Share2 size={16} />, content: <SyncApp /> }
-  };
 
   const openApp = useCallback((appId: string, options = { broadcast: true }) => {
     const app = AppRegistry[appId];
@@ -274,31 +259,141 @@ export default function App() {
     }
   }, [openWindow]);
 
-  const bringToFront = useCallback((id: string, options: { broadcast?: boolean } = { broadcast: true }) => {
-    setActiveWindowId(id);
-    setWindows(prev => {
-      const maxZ = Math.max(...prev.map(w => w.zIndex));
-      return prev.map(w => w.id === id ? { ...w, zIndex: maxZ + 1 } : w);
-    });
-    if (options.broadcast) {
-      broadcast('window_action', { action: 'focus', id });
-    }
-  }, [broadcast]);
+  const openEditor = useCallback((path: string) => {
+    const fileName = path.split('/').pop() || 'documento.txt';
+    const editorId = `editor-${path.replace(/\//g, '_')}`;
+    
+    openWindow(
+      editorId,
+      `Editor - ${fileName}`,
+      <FileText size={16} />,
+      <EditorApp filePath={path} />,
+      { broadcast: true }
+    );
+  }, [openWindow, closeWindow]);
 
-  const closeWindow = useCallback((id: string, options: { broadcast?: boolean } = { broadcast: true }) => {
-    setWindows(prev => prev.filter(w => w.id !== id));
-    if (activeWindowId === id) {
-      const remaining = windows.filter(w => w.id !== id);
-      if (remaining.length > 0) {
-        setActiveWindowId(remaining[remaining.length - 1].id);
-      } else {
-        setActiveWindowId(null);
+  const openFileInApp = useCallback((path: string) => {
+    const fileName = path.split('/').pop() || '';
+    const ext = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() : '';
+    
+    if (ext === 'txt' || ext === 'md' || ext === 'sh' || ext === 'json' || ext === 'js') {
+      openEditor(path);
+    } else {
+      console.log('Opening with default (FilesApp):', fileName);
+      openApp('files');
+    }
+  }, [openApp, openEditor]);
+
+  const AppRegistry: Record<string, { title: string; icon: any; content: React.ReactNode }> = {
+    'terminal': { title: 'Terminal', icon: <Terminal size={16} />, content: <TerminalApp userName={userName} /> },
+    'files': { title: 'Gerenciador de Arquivos', icon: <FolderOpen size={16} />, content: <FilesApp userName={userName} onContextMenu={handleContextMenu} onOpenFile={openFileInApp} /> },
+    'binaries': { title: 'Gerenciador de Binários', icon: <FileCode size={16} />, content: <BinariesApp onDelete={handleDelete} onContextMenu={handleContextMenu} /> },
+    'settings': { title: 'Configurações do Sistema', icon: <Settings size={16} />, content: <SettingsApp userName={userName} onUserNameChange={handleUserNameChange} /> },
+    'monitor': { title: 'Monitor do Sistema', icon: <Activity size={16} />, content: <MonitorApp emulatorState={emulatorState} /> },
+    'browser': { title: 'Trymon Browser', icon: <Globe size={16} />, content: <BrowserApp /> },
+    'trash': { title: 'Lixeira', icon: <Trash2 size={16} />, content: <TrashApp /> },
+    'sync': { title: 'Sessão Remota', icon: <Share2 size={16} />, content: <SyncApp /> },
+    'editor': { title: 'Editor de Texto', icon: <FileText size={16} />, content: <EditorApp filePath="" /> }
+  };
+
+
+  const handleCreateNewFile = useCallback(async (extension: string, targetX?: number, targetY?: number) => {
+    const defaultName = `novo_arquivo${extension}`;
+    const desktopPath = `/home/trymon/Desktop/${defaultName}`;
+
+    console.log(`Creating file: ${desktopPath}`);
+    kernel.createFile(desktopPath);
+    
+    // Grid snapping constants (matching handleIconMouseUp)
+    const GRID_X = 100;
+    const GRID_Y = 110;
+    const MARGIN = 20;
+
+    const startX = targetX !== undefined ? 
+      Math.max(MARGIN, Math.round((targetX - MARGIN - 40) / GRID_X) * GRID_X + MARGIN) : MARGIN;
+    const startY = targetY !== undefined ? 
+      Math.max(MARGIN, Math.round((targetY - MARGIN - 40) / GRID_Y) * GRID_Y + MARGIN) : MARGIN;
+
+    const newIcon: DesktopIcon = {
+      id: `file-${crypto.randomUUID()}`,
+      label: defaultName,
+      icon: extension === '.txt' ? <FileText size={32} /> :
+        extension === '.md' ? <FileText size={32} color="#0070f3" /> :
+          extension === '.trymon' ? <Package size={32} color="#00f2ff" /> :
+            <FileCode size={32} />,
+      onClick: () => openFileInApp(desktopPath),
+      x: startX,
+      y: startY,
+      path: desktopPath,
+      isEditing: true
+    };
+    setIcons(prev => [...prev, newIcon]);
+    kernel.saveVFSState();
+  }, [openFileInApp]);
+
+
+  const handleCreateNewFolder = useCallback(async (targetX?: number, targetY?: number) => {
+    const defaultName = 'Nova Pasta';
+    const folderPath = `/home/trymon/Desktop/${defaultName}`;
+    console.log(`Creating folder: ${folderPath}`);
+    kernel.createDirectory(folderPath);
+    
+    // Grid snapping constants
+    const GRID_X = 100;
+    const GRID_Y = 110;
+    const MARGIN = 20;
+
+    const startX = targetX !== undefined ? 
+      Math.max(MARGIN, Math.round((targetX - MARGIN - 40) / GRID_X) * GRID_X + MARGIN) : MARGIN;
+    const startY = targetY !== undefined ? 
+      Math.max(MARGIN, Math.round((targetY - MARGIN - 40) / GRID_Y) * GRID_Y + MARGIN) : MARGIN;
+
+    const newIcon: DesktopIcon = {
+      id: `folder-${crypto.randomUUID()}`,
+      label: defaultName,
+      icon: <FolderOpen size={32} />,
+      onClick: () => openApp('files'),
+      x: startX,
+      y: startY,
+      path: folderPath,
+      isEditing: true
+    };
+    setIcons(prev => [...prev, newIcon]);
+    kernel.saveVFSState();
+  }, [openApp]);
+
+  const handleRenameIcon = useCallback((id: string, newName: string) => {
+    setIcons(prev => {
+      const icon = prev.find(i => i.id === id);
+      if (!icon || !icon.path || !newName || newName === icon.label) {
+        return prev.map(i => i.id === id ? { ...i, isEditing: false } : i);
       }
-    }
-    if (options.broadcast) {
-      broadcast('window_action', { action: 'close', id });
-    }
-  }, [activeWindowId, windows, broadcast]);
+
+      const parentDir = icon.path.split('/').slice(0, -1).join('/') || '/';
+      const newPath = parentDir === '/' ? `/${newName}` : `${parentDir}/${newName}`;
+
+      try {
+        kernel.renamePath(icon.path, newPath);
+        return prev.map(i => i.id === id ? { ...i, label: newName, path: newPath, isEditing: false } : i);
+      } catch (e) {
+        console.error('Rename failed:', e);
+        return prev.map(i => i.id === id ? { ...i, isEditing: false } : i);
+      }
+    });
+  }, []);
+
+
+
+  // Clock useEffect removed - now handled by memoized SystemClock component
+
+
+
+
+
+
+
+
+
 
   const minimizeWindow = useCallback((id: string) => {
     setWindows(prev => prev.map(w => w.id === id ? { ...w, isMinimized: true } : w));
@@ -327,6 +422,7 @@ export default function App() {
       { id: 'browser', label: 'Navegador', icon: <Globe size={32} />, onClick: () => openApp('browser'), x: MARGIN + GRID_X, y: MARGIN + GRID_Y },
       { id: 'sync', label: 'Sessão Remota', icon: <Share2 size={32} />, onClick: () => openApp('sync'), x: MARGIN + GRID_X * 2, y: MARGIN + GRID_Y },
       { id: 'settings', label: 'Configurações', icon: <Settings size={32} />, onClick: () => openApp('settings'), x: MARGIN + GRID_X * 3, y: MARGIN + GRID_Y },
+      { id: 'editor', label: 'Editor', icon: <FileText size={32} />, onClick: () => openApp('editor'), x: MARGIN, y: MARGIN + GRID_Y * 2 },
     ];
 
     // Add installed Trymon apps as desktop icons
@@ -347,19 +443,19 @@ export default function App() {
 
   // Handle incoming sync events
   useEffect(() => {
-    const unsubMove = onEvent('window_move', (payload) => {
+    const unsubMove = onEvent('window_move', (payload: any) => {
       setWindows(prev => prev.map(w => w.id === payload.id ? { ...w, position: { x: payload.x, y: payload.y } } : w));
     });
 
-    const unsubResize = onEvent('window_resize', (payload) => {
+    const unsubResize = onEvent('window_resize', (payload: any) => {
       setWindows(prev => prev.map(w => w.id === payload.id ? { ...w, size: payload.size, position: payload.position } : w));
     });
 
-    const unsubIcon = onEvent('icon_move', (payload) => {
+    const unsubIcon = onEvent('icon_move', (payload: any) => {
       setIcons(prev => prev.map(icon => icon.id === payload.id ? { ...icon, x: payload.x, y: payload.y } : icon));
     });
 
-    const unsubAction = onEvent('window_action', (payload) => {
+    const unsubAction = onEvent('window_action', (payload: any) => {
       if (payload.action === 'open') {
         openApp(payload.appId, { broadcast: false });
       } else if (payload.action === 'close') {
@@ -369,7 +465,7 @@ export default function App() {
       }
     });
 
-    const unsubStateReq = onEvent('sys:request_state', (_payload, sender) => {
+    const unsubStateReq = onEvent('sys:request_state', (_payload: any, sender: string) => {
       // Host sends current state to requester
       sendTo(sender, 'sys:initial_state', { 
         windows: windows.map(w => ({ ...w, content: null })), // Don't send components
@@ -377,7 +473,7 @@ export default function App() {
       });
     });
 
-    const unsubStateInit = onEvent('sys:initial_state', (payload) => {
+    const unsubStateInit = onEvent('sys:initial_state', (payload: any) => {
       // Guest hydrates state
       console.log('Hydrating state:', payload);
       // Re-map contents from registry
@@ -798,28 +894,7 @@ export default function App() {
     }
   }, [selection?.active, handleDesktopMouseMove, handleDesktopMouseUp]);
 
-  const desktopContextMenu: ContextMenuItem[] = [
-    { label: 'Abrir Terminal', icon: <Terminal size={14} />, onClick: () => icons.find((i: DesktopIcon) => i.id === 'terminal')?.onClick() },
-    { label: 'Abrir Navegador', icon: <Globe size={14} />, onClick: () => icons.find((i: DesktopIcon) => i.id === 'browser')?.onClick() },
-    {
-      label: 'Novo Arquivo',
-      icon: <Plus size={14} />,
-      items: [
-        { label: 'Documento de Texto (.txt)', icon: <FileText size={14} />, onClick: () => handleCreateNewFile('.txt') },
-        { label: 'Markdown (.md)', icon: <FileText size={14} color="#0070f3" />, onClick: () => handleCreateNewFile('.md') },
-        { label: 'Pacote Trymon (.trymon)', icon: <Package size={14} color="#00f2ff" />, onClick: () => handleCreateNewFile('.trymon') },
-        { label: 'Script Shell (.sh)', icon: <Terminal size={14} />, onClick: () => handleCreateNewFile('.sh') },
-        { separator: true },
-        { label: 'Nova Pasta', icon: <FolderPlus size={14} />, onClick: () => handleCreateNewFolder() },
-      ]
-    },
-    { separator: true },
-    { label: 'Atualizar', icon: <RefreshCw size={14} />, onClick: () => window.location.reload() },
-    { label: 'Alterar Wallpaper', icon: <ImageIcon size={14} />, onClick: () => wallpaperInputRef.current?.click() },
-    { separator: true },
-    { label: 'Configurações', icon: <Settings size={14} />, onClick: () => icons.find((i: DesktopIcon) => i.id === 'settings')?.onClick() },
-    { label: 'Sobre o Trymon OS', icon: <Info size={14} />, onClick: () => alert('Trymon OS v1.0.0\nRunning on WASM/Rust Kernel') },
-  ];
+
 
   const isRunning = kernelState.state.state === 'Running';
 
@@ -831,7 +906,32 @@ export default function App() {
         className="os-desktop"
         ref={desktopRef}
         style={{ background: wallpaper, display: isRunning ? 'block' : 'none' }}
-        onContextMenu={(e) => handleContextMenu(e, desktopContextMenu)}
+        onContextMenu={(e) => {
+          const x = e.clientX;
+          const y = e.clientY;
+          handleContextMenu(e, [
+            { label: 'Abrir Terminal', icon: <Terminal size={14} />, onClick: () => icons.find((i: DesktopIcon) => i.id === 'terminal')?.onClick() },
+            { label: 'Abrir Navegador', icon: <Globe size={14} />, onClick: () => icons.find((i: DesktopIcon) => i.id === 'browser')?.onClick() },
+            {
+              label: 'Novo Arquivo',
+              icon: <Plus size={14} />,
+              items: [
+                { label: 'Documento de Texto (.txt)', icon: <FileText size={14} />, onClick: () => handleCreateNewFile('.txt', x, y) },
+                { label: 'Markdown (.md)', icon: <FileText size={14} color="#0070f3" />, onClick: () => handleCreateNewFile('.md', x, y) },
+                { label: 'Pacote Trymon (.trymon)', icon: <Package size={14} color="#00f2ff" />, onClick: () => handleCreateNewFile('.trymon', x, y) },
+                { label: 'Script Shell (.sh)', icon: <Terminal size={14} />, onClick: () => handleCreateNewFile('.sh', x, y) },
+                { separator: true },
+                { label: 'Nova Pasta', icon: <FolderPlus size={14} />, onClick: () => handleCreateNewFolder(x, y) },
+              ]
+            },
+            { separator: true },
+            { label: 'Atualizar', icon: <RefreshCw size={14} />, onClick: () => window.location.reload() },
+            { label: 'Alterar Wallpaper', icon: <ImageIcon size={14} />, onClick: () => wallpaperInputRef.current?.click() },
+            { separator: true },
+            { label: 'Configurações', icon: <Settings size={14} />, onClick: () => icons.find((i: DesktopIcon) => i.id === 'settings')?.onClick() },
+            { label: 'Sobre o Trymon OS', icon: <Info size={14} />, onClick: () => alert('Trymon OS v1.0.0\nRunning on WASM/Rust Kernel') },
+          ]);
+        }}
         onMouseDown={handleDesktopMouseDown}
         onClick={() => setContextMenu(null)}
       >
@@ -863,7 +963,7 @@ export default function App() {
 
         {/* Desktop Icons */}
         <div className="desktop-icons">
-          {icons.map(icon => (
+          {icons.filter(i => !i.label.startsWith('.')).map(icon => (
             <div
               key={icon.id}
               className={`desktop-icon ${draggingIconId === icon.id ? 'dragging' : ''} ${selectedIconIds.includes(icon.id) ? 'selected' : ''}`}
@@ -878,9 +978,17 @@ export default function App() {
               onMouseDown={(e) => handleIconMouseDown(e, icon.id)}
               onContextMenu={(e) => handleContextMenu(e, [
                 { label: `Abrir ${icon.label}`, icon: icon.icon, onClick: icon.onClick },
+                { label: 'Renomear', icon: <Edit3 size={14} />, onClick: () => setIcons(prev => prev.map(i => i.id === icon.id ? { ...i, isEditing: true } : i)) },
                 { separator: true },
                 { label: 'Fixar na Barra de Tarefas', icon: <Plus size={14} />, onClick: () => console.log('Pinning') },
-                { label: 'Excluir Atalho', icon: <X size={14} />, danger: true, onClick: () => console.log('Delete shortcut') }
+                { label: icon.path ? 'Excluir' : 'Excluir Atalho', icon: <X size={14} />, danger: true, onClick: () => {
+                  if (icon.path) {
+                    kernel.moveToTrash(icon.path);
+                    setIcons(prev => prev.filter(i => i.id !== icon.id));
+                  } else {
+                    setIcons(prev => prev.filter(i => i.id !== icon.id));
+                  }
+                }}
               ])}
             >
               <div className="icon-image">
@@ -889,7 +997,30 @@ export default function App() {
                   <span className="icon-badge">{icon.badge > 99 ? '99+' : icon.badge}</span>
                 )}
               </div>
-              <div className="icon-label">{icon.label}</div>
+              {icon.isEditing ? (
+                <input
+                  type="text"
+                  className="icon-label-input"
+                  defaultValue={icon.label}
+                  autoFocus
+                  onFocus={(e) => {
+                    // Select only the name part if there's an extension
+                    const lastDot = e.target.value.lastIndexOf('.');
+                    if (lastDot > 0) {
+                      e.target.setSelectionRange(0, lastDot);
+                    } else {
+                      e.target.select();
+                    }
+                  }}
+                  onBlur={(e) => handleRenameIcon(icon.id, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleRenameIcon(icon.id, (e.target as HTMLInputElement).value);
+                    if (e.key === 'Escape') setIcons(prev => prev.map(i => i.id === icon.id ? { ...i, isEditing: false } : i));
+                  }}
+                />
+              ) : (
+                <div className="icon-label">{icon.label}</div>
+              )}
             </div>
           ))}
         </div>
@@ -1016,10 +1147,10 @@ export default function App() {
               </div>
 
               <div className="side-actions">
-                <button className="side-btn" onClick={() => openWindow('settings', 'Configurações', <Settings size={16} />, <SettingsApp />)} title="Configurações">
+                <button className="side-btn" onClick={() => openWindow('settings', 'Configurações', <Settings size={16} />, <SettingsApp userName={userName} onUserNameChange={handleUserNameChange} />)} title="Configurações">
                   <Settings size={18} />
                 </button>
-                <button className="side-btn" onClick={() => openWindow('files', 'Pastas', <FolderOpen size={16} />, <FilesApp onUpload={handleUpload} onDelete={handleDelete} onContextMenu={handleContextMenu} />)} title="Arquivos">
+                <button className="side-btn" onClick={() => openWindow('files', 'Pastas', <FolderOpen size={16} />, <FilesApp userName={userName} onContextMenu={handleContextMenu} />)} title="Arquivos">
                   <FolderOpen size={18} />
                 </button>
                 <div className="spacer" />

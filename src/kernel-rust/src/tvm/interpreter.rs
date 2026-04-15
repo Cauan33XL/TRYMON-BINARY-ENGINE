@@ -3,10 +3,10 @@
 //! High-level interpreter that wraps the VM and provides a clean API
 //! for executing TVM bytecode packages.
 
-use super::bytecode::{CompileResult, PackageMetadata, TVMBytecode};
+use super::bytecode::{PackageMetadata, TVMBytecode};
 use super::memory::DEFAULT_MEMORY_LIMIT;
-use super::syscalls::{create_syscall_handler, DefaultSyscallHandler, SyscallContext};
-use super::vm::{ExecutionState, ExecutionStats, ExitReason, TVM};
+use super::syscalls::{create_syscall_handler, DefaultSyscallHandler};
+use super::vm::{ExecutionState, ExecutionStats, TVM};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -69,6 +69,7 @@ pub struct Interpreter {
     /// Loaded bytecode packages
     packages: HashMap<String, TVMBytecode>,
     /// Syscall handler
+    #[allow(dead_code)]
     syscall_handler: Option<DefaultSyscallHandler>,
     /// Max concurrent executions
     max_concurrent: usize,
@@ -191,7 +192,7 @@ impl Interpreter {
     pub fn execute_with_input(
         &mut self,
         package_id: &str,
-        input: &str,
+        _input: &str,
     ) -> Result<ExecutionResult, String> {
         let result = self.execute(package_id)?;
         // Input handling would be added here - for now just return result

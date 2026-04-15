@@ -4,8 +4,7 @@
 //! native-like programs in the browser environment.
 
 use super::vm::TVM;
-use crate::error::{KernelError, Result};
-use serde::{Deserialize, Serialize};
+
 use std::collections::HashMap;
 
 /// Syscall numbers (Linux x86_64 compatible)
@@ -479,6 +478,8 @@ pub enum Syscall {
     Getcpu = 309,
     /// openat(dirfd, path, flags, mode)
     Openat = 257,
+    /// fstatat(dirfd, path, buf, flags)
+    Fstatat = 262,
     /// unknown
     Unknown = -1,
 }
@@ -504,6 +505,7 @@ impl Syscall {
             60 => Self::Exit,
             231 => Self::ExitGroup,
             257 => Self::Openat,
+            262 => Self::Fstatat,
             _ => Self::Unknown,
         }
     }
@@ -683,7 +685,7 @@ impl SyscallHandler for DefaultSyscallHandler {
             Syscall::Mkdir => self.sys_mkdirat(args),
             Syscall::Getdents => self.sys_getdents64(args),
             Syscall::Unlink => self.sys_unlinkat(args),
-            Syscall::Fstat => self.sys_fstatat(args),
+            Syscall::Fstatat => self.sys_fstatat(args),
             Syscall::Readlink => self.sys_readlinkat(args),
 
             // Time
@@ -722,9 +724,9 @@ impl SyscallHandler for DefaultSyscallHandler {
 }
 
 impl DefaultSyscallHandler {
-    fn sys_read(&mut self, args: &[u32], vm: &mut TVM) -> i32 {
+    fn sys_read(&mut self, args: &[u32], _vm: &mut TVM) -> i32 {
         let fd = args[0] as i32;
-        let buf_ptr = args[1] as usize;
+        let _buf_ptr = args[1] as usize;
         let count = args[2] as usize;
 
         if fd == 0 {
@@ -830,15 +832,15 @@ impl DefaultSyscallHandler {
         }
     }
 
-    fn sys_uname(&mut self, vm: &mut TVM) -> i32 {
+    fn sys_uname(&mut self, _vm: &mut TVM) -> i32 {
         // Simplified uname - write to a buffer
         log::debug!("TVM: uname()");
         0
     }
 
-    fn sys_writev(&mut self, args: &[u32], vm: &mut TVM) -> i32 {
+    fn sys_writev(&mut self, args: &[u32], _vm: &mut TVM) -> i32 {
         let fd = args[0] as i32;
-        let iov_ptr = args[1] as usize;
+        let _iov_ptr = args[1] as usize;
         let iovcnt = args[2] as usize;
 
         log::debug!("TVM: writev(fd={}, iovcnt={})", fd, iovcnt);

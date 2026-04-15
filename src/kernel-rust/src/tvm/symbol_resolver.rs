@@ -178,6 +178,7 @@ pub struct LibcFunction {
 
 /// Main resolver for all symbols and library functions
 pub struct SymbolResolver {
+    #[allow(dead_code)]
     symbol_table: SymbolTable,
     plt_resolver: PLTResolver,
     libc_functions: HashMap<String, LibcFunction>,
@@ -301,27 +302,27 @@ impl SymbolResolver {
         0
     }
 
-    fn handle_calloc(args: &[u32]) -> i32 {
+    fn handle_calloc(_args: &[u32]) -> i32 {
         log::debug!("calloc called");
         0
     }
 
-    fn handle_realloc(args: &[u32]) -> i32 {
+    fn handle_realloc(_args: &[u32]) -> i32 {
         log::debug!("realloc called");
         0
     }
 
-    fn handle_memcpy(args: &[u32]) -> i32 {
+    fn handle_memcpy(_args: &[u32]) -> i32 {
         log::debug!("memcpy called");
         0
     }
 
-    fn handle_memset(args: &[u32]) -> i32 {
+    fn handle_memset(_args: &[u32]) -> i32 {
         log::debug!("memset called");
         0
     }
 
-    fn handle_memcmp(args: &[u32]) -> i32 {
+    fn handle_memcmp(_args: &[u32]) -> i32 {
         log::debug!("memcmp called");
         0
     }
@@ -331,32 +332,32 @@ impl SymbolResolver {
         0
     }
 
-    fn handle_strcpy(args: &[u32]) -> i32 {
+    fn handle_strcpy(_args: &[u32]) -> i32 {
         log::debug!("strcpy called");
         0
     }
 
-    fn handle_strncpy(args: &[u32]) -> i32 {
+    fn handle_strncpy(_args: &[u32]) -> i32 {
         log::debug!("strncpy called");
         0
     }
 
-    fn handle_strcmp(args: &[u32]) -> i32 {
+    fn handle_strcmp(_args: &[u32]) -> i32 {
         log::debug!("strcmp called");
         0
     }
 
-    fn handle_strncmp(args: &[u32]) -> i32 {
+    fn handle_strncmp(_args: &[u32]) -> i32 {
         log::debug!("strncmp called");
         0
     }
 
-    fn handle_strcat(args: &[u32]) -> i32 {
+    fn handle_strcat(_args: &[u32]) -> i32 {
         log::debug!("strcat called");
         0
     }
 
-    fn handle_strncat(args: &[u32]) -> i32 {
+    fn handle_strncat(_args: &[u32]) -> i32 {
         log::debug!("strncat called");
         0
     }

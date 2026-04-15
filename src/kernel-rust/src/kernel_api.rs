@@ -13,20 +13,27 @@ pub fn api_kernel_init(config_json: &str) -> Result<String, JsValue> {
     let config: KernelConfig =
         serde_json::from_str(config_json).unwrap_or_else(|_| KernelConfig::default());
 
-    // Initialize logger for WASM
-    wasm_logger::init(wasm_logger::Config::new(match config.log_level {
+    // Try to initialize logger - may already be initialized
+    let _ = wasm_logger::init(wasm_logger::Config::new(match config.log_level {
         0 => log::Level::Error,
         1 => log::Level::Warn,
         2 => log::Level::Info,
         _ => log::Level::Debug,
     }));
 
+    log::info!("[KernelAPI] Initializing Trymon kernel...");
+
     let mut kernel = TrymonKernel::new(config);
 
-    kernel.init().map_err(JsValue::from)?;
+    // Initialize with error handling
+    if let Err(e) = kernel.init() {
+        log::error!("[KernelAPI] Kernel init failed: {}", e);
+        return Err(JsValue::from(format!("Kernel init failed: {}", e)));
+    }
 
     *KERNEL.lock() = Some(kernel);
 
+    log::info!("[KernelAPI] Kernel initialized successfully");
     Ok("{\"status\": \"ok\", \"message\": \"Kernel initialized\"}".to_string())
 }
 
@@ -127,23 +134,26 @@ pub fn api_get_status() -> String {
             };
             serde_json::to_string(&status).unwrap_or_default()
         }
-        None => serde_json::to_string(&KernelStatusResponse {
-            initialized: false,
-            uptime: 0,
-            loaded_binaries: 0,
-            running_processes: 0,
-            memory_usage_bytes: 0,
-            filesystem_stats: crate::virtual_fs::FileSystemStats {
-                total_files: 0,
-                total_directories: 0,
-                total_size: 0,
-                mount_points: 0,
-            },
-            config: crate::KernelConfig::default(),
-            state: crate::SystemState::Halted,
-            boot_logs: vec![],
-        })
-        .unwrap_or_default(),
+        None => {
+            log::warn!("[KernelAPI] api_get_status called but kernel is not initialized");
+            serde_json::to_string(&KernelStatusResponse {
+                initialized: false,
+                uptime: 0,
+                loaded_binaries: 0,
+                running_processes: 0,
+                memory_usage_bytes: 0,
+                filesystem_stats: crate::virtual_fs::FileSystemStats {
+                    total_files: 0,
+                    total_directories: 0,
+                    total_size: 0,
+                    mount_points: 0,
+                },
+                config: crate::KernelConfig::default(),
+                state: crate::SystemState::Booting, // Return Booting instead of Halted for uninitialized state
+                boot_logs: vec!["[API] Waiting for kernel initialization...".to_string()],
+            })
+            .unwrap_or_default()
+        }
     }
 }
 
@@ -255,6 +265,19 @@ pub fn api_create_directory(path: &str) -> Result<String, JsValue> {
         .ok_or_else(|| JsValue::from_str("Failed to retrieve new directory ID"))?;
 
     Ok(id)
+}
+
+/// Rename/move a file or directory
+#[wasm_bindgen]
+pub fn api_rename(src: &str, dst: &str) -> Result<String, JsValue> {
+    let mut k = KERNEL.lock();
+    let kernel = k
+        .as_mut()
+        .ok_or_else(|| JsValue::from_str("Kernel not initialized"))?;
+
+    kernel.vfs.rename(src, dst).map_err(JsValue::from)?;
+
+    Ok("ok".to_string())
 }
 
 /// Tick the kernel (call periodically for process updates)

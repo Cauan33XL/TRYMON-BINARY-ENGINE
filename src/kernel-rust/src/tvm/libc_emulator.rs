@@ -67,7 +67,7 @@ impl LibcEmulator {
         let new_ptr = self.malloc(new_size);
 
         if new_ptr > 0 && old_size > 0 {
-            let copy_size = old_size.min(new_size);
+            let _copy_size = old_size.min(new_size);
             // In real implementation, would copy memory
         }
 
@@ -115,7 +115,7 @@ impl LibcEmulator {
             return 0;
         }
 
-        let mut len = 0;
+        let len = 0;
         // In real impl, would read from VM memory
         log::debug!("TVM libc: strlen(s=0x{:x})", s);
         len

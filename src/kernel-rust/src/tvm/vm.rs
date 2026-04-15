@@ -323,9 +323,9 @@ impl TVM {
             }
 
             // Bit operations
-            Opcode::AND => self.bin_op(|a, b| (a & b))?,
-            Opcode::OR => self.bin_op(|a, b| (a | b))?,
-            Opcode::XOR => self.bin_op(|a, b| (a ^ b))?,
+            Opcode::AND => self.bin_op(|a, b| a & b)?,
+            Opcode::OR => self.bin_op(|a, b| a | b)?,
+            Opcode::XOR => self.bin_op(|a, b| a ^ b)?,
             Opcode::NOT => {
                 if let Some(val) = self.eval_stack.pop() {
                     self.eval_stack.push(!val);

@@ -1,145 +1,178 @@
-/**
- * Terminal Component with xterm.js integration
- * Provides a real terminal interface connected to the v86 emulator or shell
- */
-
-import { useEffect, useRef, useCallback } from 'react';
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import 'xterm/css/xterm.css';
+import { useEffect, useRef, useState } from 'react';
+import { parseAnsi } from './AnsiParser';
+import { useKernelState } from '../hooks/useKernelState';
 
 interface TerminalProps {
   onInput: (data: string) => void;
   output?: string;
   isRunning: boolean;
   className?: string;
+  userName?: string;
 }
 
-export function TerminalComponent({ onInput, output, isRunning, className }: TerminalProps) {
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const initializedRef = useRef(false);
-  const outputRef = useRef<string>('');
-  const isWritingRef = useRef(false);
+export function TerminalComponent({ onInput, output = '', isRunning, className, userName = 'trymon' }: TerminalProps) {
+  const [inputValue, setInputValue] = useState('');
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
+  // Get full kernel state for better overlay messages
+  const { state: kernelState } = useKernelState();
+
+  // Auto-scroll to bottom
   useEffect(() => {
-    if (!terminalRef.current || initializedRef.current) return;
-
-    const term = new Terminal({
-      cursorBlink: true,
-      cursorStyle: 'block',
-      fontSize: 14,
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
-      theme: {
-        background: '#0d1117',
-        foreground: '#c9d1d9',
-        cursor: '#00f2ff',
-        cursorAccent: '#0a0a0c',
-        selectionBackground: '#0070f340',
-        black: '#0d1117',
-        red: '#ff7b72',
-        green: '#7ee787',
-        yellow: '#ffa657',
-        blue: '#79c0ff',
-        magenta: '#d2a8ff',
-        cyan: '#00f2ff',
-        white: '#c9d1d9',
-        brightBlack: '#6e7681',
-        brightRed: '#ffa198',
-        brightGreen: '#aff5b4',
-        brightYellow: '#ffd477',
-        brightBlue: '#a5d6ff',
-        brightMagenta: '#e2a5ff',
-        brightCyan: '#76e3ff',
-        brightWhite: '#f0f6fc'
-      },
-      allowProposedApi: true,
-      scrollback: 10000,
-      tabStopWidth: 8,
-      fontWeight: '400',
-      fontWeightBold: '700'
-    });
-
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(terminalRef.current);
-
-    setTimeout(() => {
-      fitAddon.fit();
-      term.focus();
-    }, 100);
-
-    termRef.current = term;
-    fitAddonRef.current = fitAddon;
-    initializedRef.current = true;
-
-    term.onData(data => {
-      onInput(data);
-    });
-
-    term.onResize(() => {
-      fitAddon.fit();
-    });
-
-    return () => {
-      term.dispose();
-      initializedRef.current = false;
-    };
-  }, [onInput]);
-
-  useEffect(() => {
-    if (!termRef.current || !output) return;
-
-    if (isWritingRef.current) return;
-    
-    const currentOutput = outputRef.current;
-    if (output.startsWith(currentOutput)) {
-      const newText = output.slice(currentOutput.length);
-      if (newText) {
-        isWritingRef.current = true;
-        termRef.current.write(newText);
-        outputRef.current = output;
-        setTimeout(() => {
-          isWritingRef.current = false;
-        }, 10);
-      }
-    } else if (output !== currentOutput) {
-      termRef.current.write('\x1b[2J\x1b[H');
-      termRef.current.write(output);
-      outputRef.current = output;
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [output]);
+  }, [output, isRunning]);
 
-  useEffect(() => {
-    if (!termRef.current) return;
-    termRef.current.options.cursorBlink = isRunning;
-  }, [isRunning]);
+  // Focus input on click
+  const handleContainerClick = () => {
+    inputRef.current?.focus();
+  };
 
-  useEffect(() => {
-    const handleResize = () => {
-      fitAddonRef.current?.fit();
-    };
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      const cmd = inputValue;
+      onInput(cmd + '\n');
+      
+      if (cmd.trim()) {
+        setHistory(prev => [cmd, ...prev.slice(0, 49)]);
+      }
+      setInputValue('');
+      setHistoryIndex(-1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (historyIndex < history.length - 1) {
+        const nextIndex = historyIndex + 1;
+        setHistoryIndex(nextIndex);
+        setInputValue(history[nextIndex]);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex > 0) {
+        const nextIndex = historyIndex - 1;
+        setHistoryIndex(nextIndex);
+        setInputValue(history[nextIndex]);
+      } else {
+        setHistoryIndex(-1);
+        setInputValue('');
+      }
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+    }
+  };
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+  // Logic to separate prompt from output
+  const allLines = output.split('\n');
+  const lastLine = allLines[allLines.length - 1];
+  
+  // Detect if the last line is a prompt: "root@trymon :/#" or similar
+  const isPromptLine = lastLine.includes('@trymon') && (lastLine.endsWith('# ') || lastLine.endsWith('$ '));
+  
+  const displayLines = isPromptLine ? allLines.slice(0, -1) : allLines;
+  const currentPrompt = isPromptLine ? lastLine.replace('root', userName) : '';
 
-  const focus = useCallback(() => {
-    termRef.current?.focus();
-  }, []);
+  // Determine the correct message for the overlay
+  const getOverlayMessage = () => {
+    if (kernelState.state === 'Booting') return 'INITIALIZING NATIVE KERNEL...';
+    if (kernelState.state === 'Halted') return 'KERNEL HALTED';
+    return 'SYSTEM OFFLINE';
+  };
 
   return (
-    <div
-      ref={terminalRef}
-      className={className}
-      onClick={focus}
-      style={{ 
-        width: '100%', 
+    <div 
+      className={`native-terminal-container ${className || ''}`}
+      onClick={handleContainerClick}
+      style={{
+        width: '100%',
         height: '100%',
-        outline: 'none'
+        background: '#0d1117',
+        color: '#c9d1d9',
+        fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+        fontSize: '14px',
+        padding: '12px',
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        cursor: 'text',
+        position: 'relative'
       }}
-      tabIndex={0}
-    />
+      ref={scrollRef}
+    >
+      <div className="terminal-scrollback">
+        {displayLines.map((line, idx) => (
+          <div key={idx} className="terminal-line" style={{ minHeight: '1.2em', lineHeight: '1.4' }}>
+            {parseAnsi(line)}
+          </div>
+        ))}
+      </div>
+      
+      <div className="terminal-input-line" style={{ 
+        display: 'flex', 
+        gap: '4px', 
+        marginTop: '2px',
+        alignItems: 'center',
+        flexWrap: 'wrap'
+      }}>
+        {isPromptLine && (
+          <span className="terminal-prompt" style={{ 
+            color: 'var(--accent-cyan, #00f2ff)',
+            fontWeight: 'bold',
+            whiteSpace: 'pre'
+          }}>
+            {currentPrompt}
+          </span>
+        )}
+        <input 
+          ref={inputRef}
+          type="text"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          autoFocus
+          style={{
+            flex: 1,
+            minWidth: '50px',
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            color: 'inherit',
+            fontFamily: 'inherit',
+            fontSize: 'inherit',
+            padding: 0,
+            margin: 0,
+            caretColor: 'var(--accent-cyan, #00f2ff)'
+          }}
+          spellCheck={false}
+          autoComplete="off"
+        />
+      </div>
+      
+      {!isRunning && (
+        <div className="terminal-overlay" style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(13, 17, 23, 0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backdropFilter: 'blur(4px)',
+          zIndex: 10,
+          transition: 'all 0.3s ease'
+        }}>
+          <div style={{ 
+            color: kernelState.state === 'Booting' ? 'var(--accent-cyan, #00f2ff)' : 'var(--accent-red, #ff5f5f)', 
+            fontWeight: 'bold',
+            letterSpacing: '2px',
+            fontSize: '16px',
+            textTransform: 'uppercase'
+          }}>
+            {getOverlayMessage()}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

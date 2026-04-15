@@ -116,22 +116,38 @@ impl VirtualFileSystem {
     pub fn init(&mut self) -> Result<()> {
         log::info!("VirtualFileSystem initializing...");
 
-        // Create base directory structure
-        self.create_directory("/")?;
-        self.create_directory("/bin")?;
-        self.create_directory("/usr")?;
-        self.create_directory("/usr/bin")?;
-        self.create_directory("/usr/lib")?;
-        self.create_directory("/etc")?;
-        self.create_directory("/tmp")?;
-        self.create_directory("/var")?;
-        self.create_directory("/var/log")?;
-        self.create_directory("/mnt")?;
-        self.create_directory("/mnt/binary")?;
-        self.create_directory("/home")?;
-        self.create_directory("/proc")?;
-        self.create_directory("/dev")?;
-        self.create_directory("/sys")?;
+        // Skip if already initialized
+        if self.initialized {
+            log::info!("VirtualFileSystem already initialized, skipping");
+            return Ok(());
+        }
+
+        // Create base directory structure (ignore if already exists)
+        let dirs = [
+            "/",
+            "/bin",
+            "/usr",
+            "/usr/bin",
+            "/usr/lib",
+            "/etc",
+            "/tmp",
+            "/var",
+            "/var/log",
+            "/mnt",
+            "/mnt/binary",
+            "/home",
+            "/proc",
+            "/dev",
+            "/sys",
+        ];
+
+        for dir in dirs {
+            if !self.files.contains_key(dir) {
+                if let Err(e) = self.create_directory(dir) {
+                    log::warn!("Failed to create directory {}: {}", dir, e);
+                }
+            }
+        }
 
         self.initialized = true;
         log::info!("VirtualFileSystem ready");
@@ -485,33 +501,36 @@ impl VirtualFileSystem {
 
     /// Rename/move a file or directory
     pub fn rename(&mut self, src: &str, dst: &str) -> Result<()> {
-        self.files
-            .get(src)
+        // 1. Remove the source file from the map
+        let mut file = self
+            .files
+            .remove(src)
             .ok_or_else(|| KernelError::FileSystemError(format!("Source not found: {}", src)))?;
 
-        // Update the source file's path
-        if let Some(file) = self.files.get_mut(src) {
-            file.path = dst.to_string();
-            file.name = path_utils::filename(dst).to_string();
-            file.parent = path_utils::parent(dst).map(String::from);
-            file.modified_at = chrono::Utc::now().timestamp();
-        }
+        // 2. Update its metadata
+        file.path = dst.to_string();
+        file.name = path_utils::filename(dst).to_string();
+        file.parent = path_utils::parent(dst).map(String::from);
+        file.modified_at = chrono::Utc::now().timestamp();
 
-        // Update all children paths
+        // 3. Insert into the new location
+        self.files.insert(dst.to_string(), file);
+
+        // 4. Update all children if this is a directory
         let children: Vec<String> = self
             .files
             .keys()
-            .filter(|p| p.starts_with(src) && *p != src)
+            .filter(|p| p.starts_with(&format!("{}/", src))) // Only actual children, not sibling paths
             .cloned()
             .collect();
 
-        for old_path in children {
-            let new_path = old_path.replacen(src, dst, 1);
-            if let Some(file) = self.files.get(&old_path) {
-                let mut updated = file.clone();
-                updated.path = new_path.clone();
-                self.files.remove(&old_path);
-                self.files.insert(new_path, updated);
+        for old_child_path in children {
+            let new_child_path = old_child_path.replacen(src, dst, 1);
+            if let Some(child_file) = self.files.remove(&old_child_path) {
+                let mut updated_child = child_file;
+                updated_child.path = new_child_path.clone();
+                updated_child.parent = path_utils::parent(&new_child_path).map(String::from);
+                self.files.insert(new_child_path, updated_child);
             }
         }
 

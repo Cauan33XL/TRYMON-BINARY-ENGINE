@@ -83,7 +83,7 @@ pub struct MemoryManager {
 impl MemoryManager {
     /// Create new memory manager
     pub fn new(limit: usize) -> Self {
-        let heap_size = limit.saturating_sub(DEFAULT_STACK_SIZE);
+        let _heap_size = limit.saturating_sub(DEFAULT_STACK_SIZE);
         let stack_base = limit;
 
         Self {

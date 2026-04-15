@@ -171,7 +171,7 @@ impl TrymonEngine {
     /// Execute a .trymon package directly (without installation)
     pub fn execute_package(
         &mut self,
-        vfs: &mut VirtualFileSystem,
+        _vfs: &mut VirtualFileSystem,
         loader: &BinaryLoader,
         binary_id: &str,
     ) -> Result<ExecutionResult> {

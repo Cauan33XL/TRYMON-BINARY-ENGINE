@@ -3,7 +3,7 @@
 //! Kernel-level Rust module for loading and executing Linux binaries
 //! (.AppImage, .deb, .rpm) in a WASM-based virtualized environment.
 
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![allow(clippy::missing_safety_doc)]
 
 use once_cell::sync::Lazy;
@@ -437,7 +437,7 @@ pub fn tvm_execute(package_id: &str) -> std::result::Result<String, JsValue> {
 pub fn tvm_compile_elf(elf_data: &[u8], name: &str) -> std::result::Result<String, JsValue> {
     use crate::tvm::appimage_extractor::detect_appimage as check_appimage;
     use crate::tvm::bytecode::{
-        PackageMetadata, TVMBytecode, TrymonEnvironment, TVM_MAGIC, TVM_VERSION,
+        PackageMetadata, TrymonEnvironment,
     };
     use crate::tvm::compiler::compile_elf;
 
@@ -524,7 +524,7 @@ pub fn tvm_is_initialized() -> bool {
 /// Export a loaded TVM package as .trymon binary data (returns base64)
 #[wasm_bindgen]
 pub fn tvm_export_package(package_id: &str) -> std::result::Result<Vec<u8>, JsValue> {
-    use crate::tvm::bytecode::{TVMBytecode, TVM_MAGIC, TVM_VERSION};
+
 
     let interp = crate::tvm::interpreter::INTERPRETER.lock();
     let bytecode = interp

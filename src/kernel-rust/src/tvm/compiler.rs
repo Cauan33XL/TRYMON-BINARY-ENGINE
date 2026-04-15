@@ -43,6 +43,7 @@ pub enum ElfMachine {
 
 /// ELF Program header types
 #[derive(Debug, Clone, Copy)]
+#[allow(non_camel_case_types)]
 pub enum ProgramType {
     PT_NULL = 0,
     PT_LOAD = 1,
@@ -54,33 +55,52 @@ pub enum ProgramType {
     PT_TLS = 7,
 }
 
+#[allow(dead_code)]
 const SHN_UNDEF: u16 = 0;
 const SHT_PROGBITS: u32 = 1;
 const SHT_STRTAB: u32 = 2;
+#[allow(dead_code)]
 const SHT_SYMTAB: u32 = 3;
+#[allow(dead_code)]
+#[allow(dead_code)]
 const SHT_RELA: u32 = 4;
 const SHT_NOBITS: u32 = 8;
+#[allow(dead_code)]
 const SHT_REL: u32 = 9;
 const SHF_ALLOC: u64 = 0x2;
 const SHF_EXECINSTR: u64 = 0x4;
 
+/// Represents an ELF section
 #[derive(Debug, Clone)]
 pub struct ElfSection {
+    /// Section name
     pub name: String,
+    /// Virtual address
     pub addr: u64,
+    /// File offset
     pub offset: u64,
+    /// Section size
     pub size: u64,
+    /// Section type
     pub ty: u32,
+    /// Section flags
     pub flags: u64,
 }
 
+/// Represents an ELF segment (program header)
 #[derive(Debug, Clone)]
 pub struct ElfSegment {
+    /// Segment type
     pub ty: u32,
+    /// File offset
     pub offset: u64,
+    /// Virtual address
     pub vaddr: u64,
+    /// File size
     pub filesz: u64,
+    /// Memory size
     pub memsz: u64,
+    /// Segment flags
     pub flags: u32,
 }
 
@@ -113,13 +133,21 @@ impl ElfSection {
 /// ELF Binary information
 #[derive(Debug, Clone)]
 pub struct ElfBinary {
+    /// ELF class (32/64-bit)
     pub class: ElfClass,
+    /// Endianness
     pub endian: ElfEndian,
+    /// Machine architecture
     pub machine: ElfMachine,
+    /// ELF binary type
     pub binary_type: ElfType,
+    /// Entry point address
     pub entry: u64,
+    /// List of sections
     pub sections: Vec<ElfSection>,
+    /// List of segments
     pub segments: Vec<ElfSegment>,
+    /// Raw binary data
     pub data: Vec<u8>,
 }
 
@@ -154,6 +182,7 @@ pub struct Compiler {
     /// Constant pool (strings, numbers)
     constants: Vec<ConstantPoolEntry>,
     /// Symbol table
+    #[allow(dead_code)]
     symbols: HashMap<String, u32>,
     /// Generated instructions
     instructions: Vec<u8>,
@@ -163,12 +192,15 @@ pub struct Compiler {
 
 #[derive(Debug, Clone)]
 struct ConstantPoolEntry {
+    #[allow(dead_code)]
     offset: u32,
     data: Vec<u8>,
+    #[allow(dead_code)]
     constant_type: ConstantType,
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 enum ConstantType {
     String,
     Integer,
@@ -193,7 +225,7 @@ impl Compiler {
     }
 
     /// Compile ELF to TVM bytecode
-    pub fn compile(&mut self, elf_data: &[u8], metadata: PackageMetadata) -> CompileResult {
+    pub fn compile(&mut self, elf_data: &[u8], _metadata: PackageMetadata) -> CompileResult {
         // Parse ELF
         let elf = match self.parse_elf(elf_data) {
             Ok(e) => e,
@@ -406,7 +438,7 @@ impl Compiler {
                 break;
             }
 
-            let (name_idx, ty, addr, offset, size, flags) = if is_64bit {
+            let (_name_idx, ty, addr, offset, size, flags) = if is_64bit {
                 let name_idx = u32::from_le_bytes(
                     data[sec_offset as usize..(sec_offset + 4) as usize]
                         .try_into()
@@ -726,6 +758,7 @@ impl Compiler {
     }
 
     /// Add string to constant pool
+    #[allow(dead_code)]
     fn add_string(&mut self, s: &str) -> u32 {
         let offset = self.constants.len() as u32;
         self.constants.push(ConstantPoolEntry {
@@ -737,6 +770,7 @@ impl Compiler {
     }
 
     /// Add integer to constant pool
+    #[allow(dead_code)]
     fn add_integer(&mut self, val: i32) -> u32 {
         let offset = self.constants.len() as u32;
         self.constants.push(ConstantPoolEntry {

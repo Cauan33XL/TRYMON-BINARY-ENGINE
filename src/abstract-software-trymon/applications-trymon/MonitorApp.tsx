@@ -1,7 +1,9 @@
 import type { V86State } from '../../wasm/v86-emulator';
-import { useTrymonApps, getTVMSandboxStatus } from '../../interface/hooks/useKernelState';
+import { useTrymonApps, getTVMSandboxStatus, useKernelState } from '../../interface/hooks/useKernelState';
 
-export default function MonitorApp({ kernelState, emulatorState }: { kernelState: any; emulatorState: V86State }) {
+export default function MonitorApp({ emulatorState }: { emulatorState: V86State }) {
+  const { state: kernelState } = useKernelState();
+  
   const cpuUsage = emulatorState.cpuUsage || 0;
   const memoryUsage = emulatorState.memoryUsage || 0;
   const uptime = kernelState.uptime || emulatorState.uptime || 0;

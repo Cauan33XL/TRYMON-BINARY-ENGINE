@@ -87,6 +87,11 @@ export function api_read_file(path: string): Uint8Array;
 export function api_read_from_pipe(pipe_id: string, max_bytes: number): Uint8Array;
 
 /**
+ * Rename/move a file or directory
+ */
+export function api_rename(src: string, dst: string): string;
+
+/**
  * Resolve a path (handles ./, ../, ~, symlinks)
  */
 export function api_resolve_path(path: string): string;
@@ -277,6 +282,7 @@ export interface InitOutput {
     readonly api_mount: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly api_read_file: (a: number, b: number) => [number, number, number, number];
     readonly api_read_from_pipe: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly api_rename: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly api_resolve_path: (a: number, b: number) => [number, number, number, number];
     readonly api_rollback_transaction: () => [number, number];
     readonly api_send_input: (a: number, b: number, c: number, d: number) => [number, number];

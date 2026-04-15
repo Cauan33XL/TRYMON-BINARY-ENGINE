@@ -164,7 +164,7 @@ pub enum X86Instruction {
 
 /// A decoded x86 instruction with its length and original address
 #[derive(Debug, Clone)]
-pub struct DecodedInstruction {
+pub struct DecodedX86Instruction {
     /// The decoded opcode and operands
     pub opcode: X86Instruction,
     /// Length of the instruction in bytes
@@ -191,7 +191,7 @@ impl Disassembler {
     }
 
     /// Decode all instructions in the data
-    pub fn decode_all(&mut self) -> Vec<DecodedInstruction> {
+    pub fn decode_all(&mut self) -> Vec<DecodedX86Instruction> {
         let mut instructions = Vec::new();
 
         while self.position < self.data.len() {
@@ -205,7 +205,7 @@ impl Disassembler {
     }
 
     /// Decode a single instruction at the current position
-    pub fn decode_one(&mut self) -> Option<DecodedInstruction> {
+    pub fn decode_one(&mut self) -> Option<DecodedX86Instruction> {
         if self.position >= self.data.len() {
             return None;
         }
@@ -216,7 +216,7 @@ impl Disassembler {
 
         let (opcode, length) = self.decode_instruction(byte);
 
-        Some(DecodedInstruction {
+        Some(DecodedX86Instruction {
             opcode,
             length,
             address: addr,
@@ -229,24 +229,24 @@ impl Disassembler {
             0xF4 => (X86Instruction::Hlt, 1),
             0xC3 => (X86Instruction::Ret, 1),
             0x0F => self.decode_0f_prefix(),
+            0x48 => self.decode_rex_prefix(),
+            0x89 => self.decode_mov_rm(),
+            0x8B => self.decode_mov_mr(),
+            0x85 => self.decode_test(),
             0x80..=0x8F => self.decode_80_prefix(byte),
             0xA0..=0xAF => self.decode_a0_prefix(byte),
+            0xB8..=0xBF => self.decode_mov_ri(byte),
             0xB0..=0xBF => self.decode_b0_prefix(byte),
+            0x3D => self.decode_cmp_imm(),
             0xC6..=0xC7 => self.decode_c6_prefix(byte),
             0xC8..=0xCF => self.decode_c8_prefix(byte),
             0xE8 => self.decode_call(byte),
             0xE9 => self.decode_jmp(byte),
             0xEB => self.decode_jmp_short(byte),
             0x70..=0x7F => self.decode_jcc(byte),
-            0x48 => self.decode_rex_prefix(),
-            0x89 => self.decode_mov_rm(),
-            0x8B => self.decode_mov_mr(),
-            0xB8..=0xBF => self.decode_mov_ri(byte),
             0x31 => self.decode_xor(),
             0x29 => self.decode_sub(),
             0x01 => self.decode_add(),
-            0x85 => self.decode_test(),
-            0x3D => self.decode_cmp(),
             0xFF => self.decode_ff_prefix(),
             0x9C => (X86Instruction::Push { reg: 0 }, 1),
             0x9D => (X86Instruction::Pop { reg: 0 }, 1),
@@ -261,7 +261,7 @@ impl Disassembler {
             0x05 => self.decode_add_imm(),
             0x2D => self.decode_sub_imm(),
             0x25 => self.decode_and_imm(),
-            0x3D => self.decode_cmp_imm(),
+
             _ => (X86Instruction::Unknown(vec![byte]), 1),
         }
     }
@@ -351,7 +351,7 @@ impl Disassembler {
         (X86Instruction::MovRI { dst: reg, imm }, 2)
     }
 
-    fn decode_c6_prefix(&mut self, byte: u8) -> (X86Instruction, usize) {
+    fn decode_c6_prefix(&mut self, _byte: u8) -> (X86Instruction, usize) {
         if self.position + 2 >= self.data.len() {
             return (X86Instruction::Nop, 1);
         }
@@ -360,7 +360,7 @@ impl Disassembler {
         (X86Instruction::Nop, 3)
     }
 
-    fn decode_c8_prefix(&mut self, byte: u8) -> (X86Instruction, usize) {
+    fn decode_c8_prefix(&mut self, _byte: u8) -> (X86Instruction, usize) {
         (X86Instruction::Nop, 1)
     }
 
@@ -534,6 +534,7 @@ impl Disassembler {
         (X86Instruction::TestRR { a, b }, 2)
     }
 
+#[allow(dead_code)]
     fn decode_cmp(&mut self) -> (X86Instruction, usize) {
         if self.position + 1 >= self.data.len() {
             return (X86Instruction::Nop, 1);
@@ -607,7 +608,7 @@ impl Disassembler {
 }
 
 /// Translate a decoded instruction to TVM bytecode
-pub fn translate_to_tvm(inst: &DecodedInstruction) -> Vec<u8> {
+pub fn translate_to_tvm(inst: &DecodedX86Instruction) -> Vec<u8> {
     let mut ops = Vec::new();
 
     match &inst.opcode {

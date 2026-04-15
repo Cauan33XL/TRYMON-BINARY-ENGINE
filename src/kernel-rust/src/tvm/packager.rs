@@ -5,8 +5,7 @@
 use super::bytecode::{
     CompileResult, Opcode, PackageMetadata, TVMBytecode, TVM_MAGIC, TVM_VERSION,
 };
-use super::disassembler::{translate_to_tvm, DecodedInstruction, Disassembler};
-use super::symbol_resolver::SymbolResolver;
+use super::disassembler::{translate_to_tvm, Disassembler};
 use std::collections::HashMap;
 
 /// Handles the creation of .trymon packages from ELF data
@@ -111,7 +110,7 @@ impl Packager {
     }
 
     /// Perform heuristic analysis on ELF data to identify dependencies
-    pub fn analyze_elf(&mut self, elf_data: &[u8]) {
+    pub fn analyze_elf(&mut self, _elf_data: &[u8]) {
         // Analyze which syscalls are needed
         let needed_syscalls = vec![
             0,  // read
@@ -192,7 +191,7 @@ pub fn package_elf(elf_data: &[u8], metadata: PackageMetadata) -> CompileResult 
 }
 
 /// Extract shared library dependencies from an ELF file
-pub fn extract_dependencies(elf_data: &[u8]) -> HashMap<String, Vec<String>> {
+pub fn extract_dependencies(_elf_data: &[u8]) -> HashMap<String, Vec<String>> {
     let mut deps = HashMap::new();
 
     // Simple dependency analysis

@@ -133,20 +133,30 @@ export async function init(): Promise<KernelState> {
 
   // Call kernel init. This is a synchronous WASM call.
   try {
-    rust.api_kernel_init('{}');
-    console.log('[KernelService] Kernel API call returned.');
+    const initResult = rust.api_kernel_init('{}');
+    console.log('[KernelService] Kernel init result:', initResult);
+    
+    // Check if initialization was successful
+    try {
+      const status = JSON.parse(initResult);
+      if (!status.status || status.status !== 'ok') {
+        throw new Error(initResult);
+      }
+    } catch (parseErr) {
+      console.log('[KernelService] Kernel init returned non-JSON:', initResult);
+    }
 
     // Stabilization sequence for UX (ensures person can see logs)
     return new Promise((resolve) => {
       let step = 0;
       const stabilization = [
-        { msg: "Probing virtual motherboard... [OK]", delay: 500 },
-        { msg: "Checking system memory layout... (128MB detected)", delay: 950 },
-        { msg: "Scanning virtual PCI bus artifacts...", delay: 625 },
-        { msg: "Establishing secure-boot handshake...", delay: 625 },
-        { msg: "Searching for storage devices... [VFS_READY]", delay: 500 },
-        { msg: "Initializing Trymon WASM Core v4.5.1...", delay: 750 },
-        { msg: "Loading system shell & user services...", delay: 1050 }
+        { msg: "Probing virtual motherboard... [OK]", delay: 300 },
+        { msg: "Checking system memory layout... (128MB detected)", delay: 400 },
+        { msg: "Scanning virtual PCI bus artifacts...", delay: 300 },
+        { msg: "Establishing secure-boot handshake...", delay: 300 },
+        { msg: "Searching for storage devices... [VFS_READY]", delay: 300 },
+        { msg: "Initializing Trymon WASM Core v4.5.1...", delay: 400 },
+        { msg: "Loading system shell & user services...", delay: 400 }
       ];
 
       const runStabilization = () => {
@@ -174,49 +184,61 @@ export async function init(): Promise<KernelState> {
           console.log('[KernelService] Boot sequence complete.');
 
           // Restore VFS state from persistence
-          loadVFS().then(savedVFS => {
+          // Restore VFS state from persistence
+          loadVFS().then(async (savedVFS) => {
             if (savedVFS) {
               console.log('[KernelService] Restoring VFS state...');
               try {
                 rust.kernel_import_vfs(savedVFS);
+                console.log('[KernelService] VFS restoration complete.');
               } catch (e) {
                 console.warn('[KernelService] VFS Restore failed (non-fatal):', e);
               }
             }
-          }).catch(e => console.warn('[KernelService] VFS Restore failed:', e));
 
-          _kernelReady = true;
-          _isInitializing = false;
-          _startTickLoop();
-          _startAutoSave();
+            _kernelReady = true;
+            _isInitializing = false;
+            _startTickLoop();
+            _startAutoSave();
 
-          // Seed Virtual Web Content
-          seedVirtualWeb();
+            // Setup Standard Filesystem Hierarchy and Cleanup
+            _setupFilesystemHierarchy();
 
-          // Initialize Trymord Backend
-          initTrymordBackend();
+            // Ensure user home directories exist
+            ensureUserHome('trymon');
 
-          // Initialize TVM (Trymon Virtual Machine)
-          try {
-            console.log('[KernelService] Initializing TVM...');
-            rust.tvm_init();
-            console.log('[KernelService] TVM initialized successfully');
-            _kernelState = {
-              ..._kernelState!,
-              tvm_ready: true
-            };
-          } catch (e) {
-            console.error('[KernelService] TVM init failed:', e);
-            _kernelState = {
-              ..._kernelState!,
-              tvm_error: `TVM initialization failed: ${e}`
-            };
-          }
+            // Seed Virtual Web Content
+            seedVirtualWeb();
 
-          // Final notify
-          console.log('[KernelService] Notifying callbacks, state:', _kernelState?.state);
-          _updateCallbacks.forEach(cb => cb(_kernelState!));
-          resolve(_kernelState!);
+            // Initialize Trymord Backend
+            initTrymordBackend();
+
+            // Initialize TVM (Trymon Virtual Machine)
+            try {
+              console.log('[KernelService] Initializing TVM...');
+              rust.tvm_init();
+              console.log('[KernelService] TVM initialized successfully');
+              _kernelState = {
+                ..._kernelState!,
+                tvm_ready: true
+              };
+            } catch (e) {
+              console.error('[KernelService] TVM init failed:', e);
+              _kernelState = {
+                ..._kernelState!,
+                tvm_error: `TVM initialization failed: ${e}`
+              };
+            }
+
+            // Final notify
+            console.log('[KernelService] Notifying callbacks, state:', _kernelState?.state);
+            _updateCallbacks.forEach((cb) => cb(_kernelState!));
+            resolve(_kernelState!);
+          }).catch((e) => {
+            console.error('[KernelService] VFS Load failed:', e);
+            _isInitializing = false;
+            resolve(_kernelState!);
+          });
         }
       };
 
@@ -235,8 +257,6 @@ export async function init(): Promise<KernelState> {
     throw error;
   }
 }
-
-
 
 /**
  * Check if kernel is ready (synchronous)
@@ -277,8 +297,8 @@ export function getState(): KernelState {
       running_processes: listProcesses(),
       memory_usage_bytes: status.memory_usage_bytes,
       filesystem_stats: status.filesystem_stats,
-      state: status.state,
-      boot_logs: status.boot_logs || [],
+      state: _isInitializing ? 'Booting' : status.state,
+      boot_logs: _kernelState?.boot_logs || status.boot_logs || [],
       tvm_ready: _kernelState?.tvm_ready || false,
       tvm_error: _kernelState?.tvm_error,
     };
@@ -498,6 +518,35 @@ export function runTrymonApp(appId: string): any | null {
   }
 }
 
+/**
+ * Searches the virtual web repository for packages
+ */
+export function searchRepository(term: string): any[] {
+  if (!_kernelReady) return [];
+  try {
+    const storeContent = readFile('/www/store/index.json');
+    if (!storeContent) return [];
+    
+    const store = JSON.parse(new TextDecoder().decode(storeContent));
+    const results: any[] = [];
+    const lowerTerm = term.toLowerCase();
+
+    store.sections.forEach((section: any) => {
+      section.items.forEach((item: any) => {
+        if (item.name.toLowerCase().includes(lowerTerm) || 
+            item.desc.toLowerCase().includes(lowerTerm)) {
+          results.push(item);
+        }
+      });
+    });
+
+    return results;
+  } catch (e) {
+    console.error('[KernelService] searchRepository failed:', e);
+    return [];
+  }
+}
+
 // ============================================================
 // Internal Helpers
 // ============================================================
@@ -553,11 +602,264 @@ export function cleanup(): void {
 // Virtual Web Seeding
 // ============================================================
 
+// ============================================================
+// Filesystem Initialization
+// ============================================================
+
+/**
+ * Safely creates a directory and its parents using the direct VFS API.
+ * This bypasses the shell to avoid buffer corruption.
+ */
+/**
+ * Creates a file with optional content
+ */
+export function createFile(path: string, content: string = "") {
+  console.log('[KernelService] createFile called, _kernelReady:', _kernelReady);
+  if (!_kernelReady) return;
+  try {
+    rust.api_write_file(path, new TextEncoder().encode(content));
+    saveVFSState();
+  } catch (e) {
+    console.error(`[KernelService] Failed to create file ${path}:`, e);
+  }
+}
+
+/**
+ * Creates a directory
+ */
+export function createDirectory(path: string) {
+  if (!_kernelReady) return;
+  try {
+    rust.api_create_directory(path);
+    saveVFSState();
+  } catch (e) {
+    console.error(`[KernelService] Failed to create dir ${path}:`, e);
+  }
+}
+
+/**
+ * Deletes a file or directory recursively
+ */
+export function deletePath(path: string) {
+  if (!_kernelReady) return;
+  try {
+    rust.api_shell_input(`rm -rf ${path}`);
+    saveVFSState();
+  } catch (e) {
+    console.error(`[KernelService] Failed to delete ${path}:`, e);
+  }
+}
+
+/**
+ * Moves a file or directory to the trash
+ */
+export function moveToTrash(path: string) {
+  if (!_kernelReady) return;
+  try {
+    const parentDir = path.replace(/\/[^/]+$/, '') || '/';
+    const entries = listDir(parentDir);
+    const fileName = path.split('/').pop() || '';
+    const exists = entries.some((e: any) => e.name === fileName || e.path === path);
+    
+    if (!exists) {
+      console.warn(`[KernelService] Cannot move to trash: ${path} does not exist`);
+      return;
+    }
+
+    const timestamp = Date.now();
+    const trashName = `${fileName}_${timestamp}`;
+    const trashFilePath = `/.trash/files/${trashName}`;
+    const infoPath = `/.trash/info/${trashName}.json`;
+
+    console.log(`[KernelService] Moving to trash: ${path} -> ${trashFilePath}`);
+    console.log(`[KernelService] api_rename available:`, typeof rust.api_rename);
+    
+    // Use direct VFS API instead of shell
+    if (typeof rust.api_rename === 'function') {
+      rust.api_rename(path, trashFilePath);
+    } else {
+      console.error('[KernelService] api_rename not available!');
+      return;
+    }
+    console.log(`[KernelService] api_rename called`);
+
+    // Verify file was moved
+    const stillExists = listDir(parentDir).some((e: any) => e.name === fileName);
+    console.log(`[KernelService] File still exists after rename:`, stillExists);
+
+    // Save metadata
+    const metadata = {
+      name: fileName,
+      originalPath: path,
+      deletedAt: timestamp,
+      type: 'unknown'
+    };
+    rust.api_write_file(infoPath, new TextEncoder().encode(JSON.stringify(metadata)));
+
+    saveVFSState();
+  } catch (e) {
+    console.error(`[KernelService] Failed to move to trash: ${path}`, e);
+  }
+}
+
+/**
+ * Restores an item from the trash
+ */
+export function restoreFromTrash(trashName: string) {
+  if (!_kernelReady) return;
+  try {
+    const infoPath = `/.trash/info/${trashName}.json`;
+    const trashFilePath = `/.trash/files/${trashName}`;
+    
+    const infoContent = readFile(infoPath);
+    if (!infoContent) return;
+    
+    const metadata = JSON.parse(new TextDecoder().decode(infoContent));
+    
+    // Move back
+    rust.api_shell_input(`mv ${trashFilePath} ${metadata.originalPath}`);
+    
+    // Delete info
+    rust.api_shell_input(`rm -rf ${infoPath}`);
+    
+    saveVFSState();
+  } catch (e) {
+    console.error(`[KernelService] Failed to restore from trash: ${trashName}`, e);
+  }
+}
+
+/**
+ * Lists all trash items with their metadata
+ */
+export function listVfsTrash() {
+  if (!_kernelReady) return [];
+  try {
+    const infoFiles = JSON.parse(rust.api_list_dir('/.trash/info'));
+    const seenPaths = new Set<string>();
+    return infoFiles.map((f: any) => {
+      const content = readFile(`/.trash/info/${f.name}`);
+      if (!content) return null;
+      const metadata = JSON.parse(new TextDecoder().decode(content));
+      // Use original path as unique key if not already used, otherwise add timestamp
+      let uniqueId = metadata.originalPath;
+      if (seenPaths.has(uniqueId)) {
+        uniqueId = `${uniqueId}-${metadata.deletedAt}`;
+      }
+      seenPaths.add(uniqueId);
+      return { ...metadata, id: uniqueId };
+    }).filter((item: any) => item !== null);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Renames or moves a file/directory
+ */
+export function renamePath(oldPath: string, newPath: string) {
+  if (!_kernelReady) return;
+  try {
+    rust.api_rename(oldPath, newPath);
+    saveVFSState();
+  } catch (e) {
+    console.error(`[KernelService] Failed to rename ${oldPath} to ${newPath}:`, e);
+  }
+}
+
+function createRecursiveDir(path: string) {
+  if (!_kernelReady) return;
+  const parts = path.split('/').filter(p => p !== '');
+  let currentPath = '';
+
+  for (const part of parts) {
+    currentPath += `/${part}`;
+    try {
+      // Check if it already exists
+      const dirEntry = rust.api_list_dir(currentPath);
+      if (dirEntry === '[]') {
+        rust.api_create_directory(currentPath);
+      }
+    } catch {
+      try {
+        rust.api_create_directory(currentPath);
+      } catch (e) {
+        console.warn(`[KernelService] Failed to create dir ${currentPath}:`, e);
+      }
+    }
+  }
+}
+
+function _setupFilesystemHierarchy() {
+  console.log('[KernelService] Setting up Filesystem Hierarchy (FHS)...');
+  
+  const dirs = [
+    '/bin', '/sbin', '/etc', '/home', '/root', '/tmp', '/mnt', '/opt',
+    '/usr/bin', '/usr/sbin', '/usr/lib', '/usr/local/bin',
+    '/var/log', '/var/tmp', '/var/cache', '/var/spool',
+    '/dev', '/proc', '/sys',
+    '/.trash/files', '/.trash/info'
+  ];
+
+  dirs.forEach(dir => {
+    createRecursiveDir(dir);
+  });
+
+  // Cleanup corrupted directories from previous bug (e.g. etcmkdir)
+  try {
+    const rootFiles = JSON.parse(rust.api_list_dir('/'));
+    rootFiles.forEach((f: any) => {
+      if (f.name.endsWith('mkdir')) {
+        console.log(`[KernelService] Cleaning up corrupted directory: /${f.name}`);
+        rust.api_shell_input(`rm -rf /${f.name}`);
+      }
+    });
+  } catch (e) {
+    console.warn('[KernelService] Cleanup failed:', e);
+  }
+
+  // Basic system files
+  writeFile('/etc/hostname', 'trymon');
+  writeFile('/etc/os-release', 'NAME="Trymon OS"\nVERSION="0.1.0"\nID=trymon\nPRETTY_NAME="Trymon Binary Engine OS"');
+  writeFile('/etc/motd', '\nWelcome to Trymon Binary Engine OS!\nType "help" to list binaries.\n');
+}
+
+/**
+ * Ensures that a home directory exists for the given user,
+ * along with standard subdirectories.
+ */
+export function ensureUserHome(username: string) {
+  if (!_kernelReady) return;
+  
+  console.log(`[KernelService] Ensuring home directory for user: ${username}`);
+  
+  const homeDir = `/home/${username}`;
+  const subDirs = [
+    'Downloads', 'Documents', 'Musics', 'Videos', 
+    'Workspace', 'Pictures', 'Desktop', 'Templates', 
+    'Public', '.config', '.local'
+  ];
+  
+  createRecursiveDir(homeDir);
+  
+  subDirs.forEach(sub => {
+    createRecursiveDir(`${homeDir}/${sub}`);
+  });
+
+  // Seed user config files if they don't exist
+  if (!readFile(`${homeDir}/.bashrc`)) {
+    writeFile(`${homeDir}/.bashrc`, '# Trymon Bash Config\nexport PATH=$PATH:/usr/local/bin\nalias ll="ls -la"\n');
+  }
+
+  if (!readFile(`${homeDir}/.profile`)) {
+    writeFile(`${homeDir}/.profile`, '# Trymon User Profile\n');
+  }
+}
+
 function seedVirtualWeb() {
   console.log('[KernelService] Seeding Virtual Web Content...');
 
   // Create /www structure
-  rust.api_shell_input('mkdir -p /www/store /www/social /www/cloud');
+  ['/www/store', '/www/social', '/www/cloud'].forEach(createRecursiveDir);
 
   // Trymon Store
   writeFile('/www/store/index.json', JSON.stringify({

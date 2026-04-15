@@ -18,6 +18,7 @@ export const api_load_binary: (a: number, b: number, c: number, d: number) => [n
 export const api_mount: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const api_read_file: (a: number, b: number) => [number, number, number, number];
 export const api_read_from_pipe: (a: number, b: number, c: number) => [number, number, number, number];
+export const api_rename: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const api_resolve_path: (a: number, b: number) => [number, number, number, number];
 export const api_rollback_transaction: () => [number, number];
 export const api_send_input: (a: number, b: number, c: number, d: number) => [number, number];

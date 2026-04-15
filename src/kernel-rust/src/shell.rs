@@ -376,10 +376,11 @@ impl Shell {
         String::new()
     }
 
-    /// Execute a command line
-    fn execute_command(
+    /// Execute a command line with optional stdin
+    fn execute_command_with_stdin(
         &mut self,
         line: &str,
+        stdin: Option<String>,
         vfs: &mut VirtualFileSystem,
         processes: &mut ProcessManager,
         loader: &BinaryLoader,
@@ -403,7 +404,7 @@ impl Shell {
         let expanded_line = self.expand_variables(&expanded_line);
 
         // Handle pipes (|)
-        if expanded_line.contains('|') && !expanded_line.contains('"') {
+        if expanded_line.contains('|') && !expanded_line.contains('"') && !expanded_line.contains('\'') {
             return self.execute_pipeline(&expanded_line, vfs, processes, loader);
         }
 
@@ -426,7 +427,7 @@ impl Shell {
             "ls" => self.cmd_ls(&args, vfs),
             "cd" => self.cmd_cd(&args, vfs),
             "pwd" => self.cmd_pwd(vfs),
-            "cat" => self.cmd_cat(&args, vfs),
+            "cat" => self.cmd_cat_with_stdin(&args, stdin, vfs),
             "echo" => self.cmd_echo(&args),
             "clear" => "\x1b[2J\x1b[H".to_string(),
             "status" => self.cmd_status(processes, vfs),
@@ -439,13 +440,13 @@ impl Shell {
             "cp" => self.cmd_cp(&args, vfs),
             "mv" => self.cmd_mv(&args, vfs),
             "chmod" => self.cmd_chmod(&args, vfs),
-            "grep" => self.cmd_grep(&args, vfs),
+            "grep" => self.cmd_grep_with_stdin(&args, stdin, vfs),
             "find" => self.cmd_find(&args, vfs),
-            "head" => self.cmd_head(&args, vfs),
-            "tail" => self.cmd_tail(&args, vfs),
-            "wc" => self.cmd_wc(&args, vfs),
-            "sort" => self.cmd_sort(&args, vfs),
-            "uniq" => self.cmd_uniq(&args, vfs),
+            "head" => self.cmd_head_with_stdin(&args, stdin, vfs),
+            "tail" => self.cmd_tail_with_stdin(&args, stdin, vfs),
+            "wc" => self.cmd_wc_with_stdin(&args, stdin, vfs),
+            "sort" => self.cmd_sort_with_stdin(&args, stdin, vfs),
+            "uniq" => self.cmd_uniq_with_stdin(&args, stdin, vfs),
             "date" => self.cmd_date(),
             "env" => self.cmd_env(&args),
             "export" => self.cmd_export(&args),
@@ -457,6 +458,10 @@ impl Shell {
             "file" => self.cmd_file(&args, vfs),
             "stat" => self.cmd_stat(&args, vfs),
             "kill" => self.cmd_kill(&args, processes),
+            "apt" | "trym" => self.cmd_trym(&args, vfs),
+            "sudo" => self.cmd_sudo(&args, vfs, processes, loader),
+            "neofetch" | "trym-fetch" => self.cmd_neofetch(processes, vfs),
+            "top" => self.cmd_top(processes, vfs),
             "true" => {
                 self.last_exit_code = 0;
                 String::new()
@@ -520,6 +525,18 @@ impl Shell {
             output
         }
     }
+
+    /// Execute a command line
+    fn execute_command(
+        &mut self,
+        line: &str,
+        vfs: &mut VirtualFileSystem,
+        processes: &mut ProcessManager,
+        loader: &BinaryLoader,
+    ) -> String {
+        self.execute_command_with_stdin(line, None, vfs, processes, loader)
+    }
+
 
     /// Parse command-line arguments (handles quotes)
     fn parse_args(&self, line: &str) -> Vec<String> {
@@ -614,16 +631,21 @@ impl Shell {
         loader: &BinaryLoader,
     ) -> String {
         let parts: Vec<&str> = line.split('|').map(|s| s.trim()).collect();
-        let mut output = String::new();
+        let mut last_output: Option<String> = None;
 
         for cmd in parts {
-            // For now, just execute the last command in the pipeline
-            // TODO: Implement proper pipe handling with intermediate buffers
-            output = self.execute_command(cmd, vfs, processes, loader);
+            last_output = Some(self.execute_command_with_stdin(
+                cmd,
+                last_output,
+                vfs,
+                processes,
+                loader,
+            ));
         }
 
-        output
+        last_output.unwrap_or_default()
     }
+
 
     // ============================================================
     // Built-in Commands
@@ -662,9 +684,12 @@ impl Shell {
         help.push_str("  history             Show command history\n");
         help.push_str("  which <cmd>         Locate command\n");
         help.push_str("\n");
-        help.push_str("\x1b[1;36mSystem Info:\x1b[0m\n");
+        help.push_str("\x1b[1;36mSystem & Packages:\x1b[0m\n");
         help.push_str("  ps                  List processes\n");
+        help.push_str("  top                 Dynamic process monitor\n");
         help.push_str("  kill <pid>          Terminate process\n");
+        help.push_str("  trym <cmd>          Package manager (install, rm, update)\n");
+        help.push_str("  neofetch            Show system information\n");
         help.push_str("  whoami              Show current user\n");
         help.push_str("  uname [-a]          System information\n");
         help.push_str("  date                Show date and time\n");
@@ -768,8 +793,11 @@ impl Shell {
         format!("{}\n", vfs.cwd())
     }
 
-    fn cmd_cat(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+    fn cmd_cat_with_stdin(&mut self, args: &[&str], stdin: Option<String>, vfs: &VirtualFileSystem) -> String {
         if args.is_empty() {
+            if let Some(data) = stdin {
+                return data;
+            }
             return "cat: missing operand\nTry 'cat --help' for more information.\n".to_string();
         }
 
@@ -798,7 +826,7 @@ impl Shell {
                         }
                     } else {
                         output.push_str(&text);
-                        if !output.ends_with('\n') {
+                        if !output.ends_with('\n') && !text.is_empty() {
                             output.push('\n');
                         }
                     }
@@ -812,6 +840,12 @@ impl Shell {
         }
         output
     }
+
+    #[allow(dead_code)]
+    fn cmd_cat(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+        self.cmd_cat_with_stdin(args, None, vfs)
+    }
+
 
     fn cmd_echo(&mut self, args: &[&str]) -> String {
         let mut suppress_newline = false;
@@ -1054,7 +1088,7 @@ impl Shell {
         }
     }
 
-    fn cmd_grep(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+    fn cmd_grep_with_stdin(&mut self, args: &[&str], stdin: Option<String>, vfs: &VirtualFileSystem) -> String {
         let mut ignore_case = false;
         let mut invert_match = false;
         let mut line_numbers = false;
@@ -1079,6 +1113,19 @@ impl Shell {
         };
 
         if files.is_empty() {
+            if let Some(input) = stdin {
+                let mut output = String::new();
+                let search_pattern = if ignore_case { pattern.to_lowercase() } else { pattern.to_string() };
+                for (i, line) in input.lines().enumerate() {
+                    let search_line = if ignore_case { line.to_lowercase() } else { line.to_string() };
+                    if search_line.contains(&search_pattern) != invert_match {
+                        if line_numbers { output.push_str(&format!("{}:", i + 1)); }
+                        output.push_str(line);
+                        output.push('\n');
+                    }
+                }
+                return output;
+            }
             return "grep: missing file operand\n".to_string();
         }
 
@@ -1124,6 +1171,12 @@ impl Shell {
         output
     }
 
+    #[allow(dead_code)]
+    fn cmd_grep(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+        self.cmd_grep_with_stdin(args, None, vfs)
+    }
+
+
     fn cmd_find(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
         let mut path = ".";
         let mut name_filter = None;
@@ -1164,7 +1217,7 @@ impl Shell {
         }
     }
 
-    fn cmd_head(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+    fn cmd_head_with_stdin(&mut self, args: &[&str], stdin: Option<String>, vfs: &VirtualFileSystem) -> String {
         let mut lines = 10;
         let mut files = Vec::new();
 
@@ -1182,6 +1235,14 @@ impl Shell {
         }
 
         if files.is_empty() {
+            if let Some(input) = stdin {
+                let mut output = String::new();
+                for line in input.lines().take(lines) {
+                    output.push_str(line);
+                    output.push('\n');
+                }
+                return output;
+            }
             return "head: missing file operand\n".to_string();
         }
 
@@ -1205,7 +1266,13 @@ impl Shell {
         output
     }
 
-    fn cmd_tail(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+    #[allow(dead_code)]
+    fn cmd_head(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+        self.cmd_head_with_stdin(args, None, vfs)
+    }
+
+
+    fn cmd_tail_with_stdin(&mut self, args: &[&str], stdin: Option<String>, vfs: &VirtualFileSystem) -> String {
         let mut lines = 10;
         let mut files = Vec::new();
 
@@ -1223,6 +1290,16 @@ impl Shell {
         }
 
         if files.is_empty() {
+            if let Some(input) = stdin {
+                let mut output = String::new();
+                let all_lines: Vec<&str> = input.lines().collect();
+                let start = if all_lines.len() > lines { all_lines.len() - lines } else { 0 };
+                for line in &all_lines[start..] {
+                    output.push_str(line);
+                    output.push('\n');
+                }
+                return output;
+            }
             return "tail: missing file operand\n".to_string();
         }
 
@@ -1252,7 +1329,13 @@ impl Shell {
         output
     }
 
-    fn cmd_wc(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+    #[allow(dead_code)]
+    fn cmd_tail(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+        self.cmd_tail_with_stdin(args, None, vfs)
+    }
+
+
+    fn cmd_wc_with_stdin(&mut self, args: &[&str], stdin: Option<String>, vfs: &VirtualFileSystem) -> String {
         let mut files = Vec::new();
         for arg in args {
             if !arg.starts_with('-') {
@@ -1261,6 +1344,12 @@ impl Shell {
         }
 
         if files.is_empty() {
+            if let Some(input) = stdin {
+                let lines = input.lines().count();
+                let words = input.split_whitespace().count();
+                let chars = input.chars().count();
+                return format!("{} {} {}\n", lines, words, chars);
+            }
             return "wc: missing file operand\n".to_string();
         }
 
@@ -1300,7 +1389,13 @@ impl Shell {
         output
     }
 
-    fn cmd_sort(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+    #[allow(dead_code)]
+    fn cmd_wc(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+        self.cmd_wc_with_stdin(args, None, vfs)
+    }
+
+
+    fn cmd_sort_with_stdin(&mut self, args: &[&str], stdin: Option<String>, vfs: &VirtualFileSystem) -> String {
         let mut reverse = false;
         let mut unique = false;
         let mut files = Vec::new();
@@ -1315,6 +1410,13 @@ impl Shell {
         }
 
         if files.is_empty() {
+            if let Some(input) = stdin {
+                let mut lines: Vec<&str> = input.lines().collect();
+                lines.sort();
+                if reverse { lines.reverse(); }
+                if unique { lines.dedup(); }
+                return lines.join("\n") + "\n";
+            }
             return "sort: missing file operand\n".to_string();
         }
 
@@ -1346,7 +1448,13 @@ impl Shell {
         output
     }
 
-    fn cmd_uniq(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+    #[allow(dead_code)]
+    fn cmd_sort(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+        self.cmd_sort_with_stdin(args, None, vfs)
+    }
+
+
+    fn cmd_uniq_with_stdin(&mut self, args: &[&str], stdin: Option<String>, vfs: &VirtualFileSystem) -> String {
         let mut files = Vec::new();
         for arg in args {
             if !arg.starts_with('-') {
@@ -1355,6 +1463,18 @@ impl Shell {
         }
 
         if files.is_empty() {
+            if let Some(input) = stdin {
+                let mut output = String::new();
+                let mut prev: Option<&str> = None;
+                for line in input.lines() {
+                    if Some(line) != prev {
+                        output.push_str(line);
+                        output.push('\n');
+                    }
+                    prev = Some(line);
+                }
+                return output;
+            }
             return "uniq: missing file operand\n".to_string();
         }
 
@@ -1381,6 +1501,86 @@ impl Shell {
         }
         output
     }
+
+    #[allow(dead_code)]
+    fn cmd_uniq(&mut self, args: &[&str], vfs: &VirtualFileSystem) -> String {
+        self.cmd_uniq_with_stdin(args, None, vfs)
+    }
+
+    fn cmd_trym(&mut self, args: &[&str], vfs: &mut VirtualFileSystem) -> String {
+        if args.is_empty() {
+            return "\x1b[1;36mtrym\x1b[0m 1.0.0 - Official Trymon Package Manager\nUsage: trym [list|update|install <package>|rm <package>|search <term>]\n".to_string();
+        }
+
+        match args[0] {
+            "list" => {
+                let mut output = String::from("\x1b[1;33mInstalled packages on Trymon OS:\x1b[0m\n\n");
+                let apps_dir = "/bin";
+                if let Ok(files) = vfs.list_directory(apps_dir) {
+                    for f in files {
+                        output.push_str(&format!(" \x1b[1;32m●\x1b[0m {: <15} [v1.0.0] - System Binary\n", f.name));
+                    }
+                }
+                output.push_str("\nUse 'trym search' to find more applications.\n");
+                output
+            }
+            "search" => {
+                let term = args.get(1).unwrap_or(&"");
+                if term.is_empty() { return "Usage: trym search <term>\n".to_string(); }
+                format!("\x1b[1mSearching Trymon Cloud Repository for '{}'...\x1b[0m\n\n\x1b[1;32m✔\x1b[0m firefox - Modern Web Browser\n\x1b[1;32m✔\x1b[0m code-oss - Open Source VS Code\n\x1b[1;32m✔\x1b[0m spotify - Music for Trymon\n\nFound 3 results.\n", term)
+            }
+            "install" => {
+                let pkg = args.get(1).unwrap_or(&"");
+                if pkg.is_empty() { return "trym: please specify a package to install\n".to_string(); }
+                let mut output = format!("\x1b[1mPreparing to install {}...\x1b[0m\n", pkg);
+                output.push_str("Reading database... Done\n");
+                output.push_str("Calculating dependencies... Done\n\n");
+                output.push_str(&format!("Fetching {} from cdn.trymon.org...\n", pkg));
+                output.push_str("\x1b[1;34m[##########] 100% (4.2 MB)\x1b[0m\n");
+                output.push_str(&format!("Unpacking {}...\n", pkg));
+                output.push_str(&format!("Setting up {} (1.0.0)...\n", pkg));
+                output.push_str(&format!("\x1b[1;32mSUCCESS:\x1b[0m {} is now available.\n", pkg));
+                output
+            }
+            "rm" | "remove" => {
+                let pkg = args.get(1).unwrap_or(&"");
+                if pkg.is_empty() { return "trym: please specify a package to remove\n".to_string(); }
+                let mut output = format!("\x1b[1mRemoving {} from Trymon OS...\x1b[0m\n", pkg);
+                output.push_str("Checking for dependents... None\n");
+                output.push_str(&format!("Purging files for {}...\n", pkg));
+                output.push_str("\x1b[1;34m[##########] 100%\x1b[0m\n");
+                output.push_str(&format!("\x1b[1;32mDONE:\x1b[0m {} has been removed.\n", pkg));
+                output
+            }
+            "update" => {
+                let mut output = String::from("\x1b[1mUpdating Trymon OS...\x1b[0m\n");
+                output.push_str("Hit:1 http://repo.trymon.org stable InRelease\n");
+                output.push_str("Get:2 http://cdn.trymon.org security InRelease [12.4 kB]\n");
+                output.push_str("Reading package lists... Done\n");
+                output.push_str("Building dependency tree... Done\n");
+                output.push_str("\x1b[1;32mSystem is up to date.\x1b[0m\n");
+                output
+            }
+            _ => format!("trym: unknown command '{}'. Try 'trym --help'\n", args[0]),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn cmd_apt(&mut self, args: &[&str], vfs: &mut VirtualFileSystem) -> String {
+        self.cmd_trym(args, vfs)
+    }
+
+
+    fn cmd_sudo(&mut self, args: &[&str], vfs: &mut VirtualFileSystem, processes: &mut ProcessManager, loader: &BinaryLoader) -> String {
+        if args.is_empty() {
+            return "usage: sudo <command> [args]\n".to_string();
+        }
+        
+        let cmd_line = args.join(" ");
+        // Trymon is root-first architecture, so sudo just executes
+        self.execute_command(&cmd_line, vfs, processes, loader)
+    }
+
 
     fn cmd_date(&self) -> String {
         use chrono::Local;
@@ -2006,6 +2206,71 @@ impl Shell {
 
     fn cmd_id(&self) -> String {
         format!("uid=0(root) gid=0(root) groups=0(root)\n")
+    }
+
+    fn cmd_neofetch(&self, processes: &ProcessManager, vfs: &VirtualFileSystem) -> String {
+        let stats = vfs.stats();
+        let uptime = processes.running_count(); // Simplified
+        let mem_total = 128 * 1024 * 1024;
+        let mem_used = processes.memory_usage();
+        
+        let logo = vec![
+            "\x1b[1;36m       .---.       \x1b[0m",
+            "\x1b[1;36m      /     \\      \x1b[0m",
+            "\x1b[1;36m     |  (O)  |     \x1b[0m",
+            "\x1b[1;36m  ---'       '---  \x1b[0m",
+            "\x1b[1;36m /  Trymon Kernel  \\ \x1b[0m",
+            "\x1b[1;36m |      V1.0.0     | \x1b[0m",
+            "\x1b[1;36m \\    _________    / \x1b[0m",
+            "\x1b[1;36m  '---'       '---'  \x1b[0m",
+        ];
+
+        let mut output = String::new();
+        let info = vec![
+            format!("\x1b[1;36mroot\x1b[0m@\x1b[1;36mtrymon\x1b[0m"),
+            format!("-----------------"),
+            format!("\x1b[1;36mOS\x1b[0m: Trymon Linux x86_64"),
+            format!("\x1b[1;36mKernel\x1b[0m: 6.19.12-trymon-wasm"),
+            format!("\x1b[1;36mUptime\x1b[0m: {} mins", uptime),
+            format!("\x1b[1;36mPackages\x1b[0m: {} (trym)", stats.total_files / 10),
+            format!("\x1b[1;36mShell\x1b[0m: trybash 1.0.0"),
+            format!("\x1b[1;36mWM\x1b[0m: Trymon WM (Glassmorphism)"),
+            format!("\x1b[1;36mMemory\x1b[0m: {}MB / {}MB", mem_used / 1024 / 1024, mem_total / 1024 / 1024),
+        ];
+
+        for i in 0..std::cmp::max(logo.len(), info.len()) {
+            let l = logo.get(i).cloned().unwrap_or("                   ");
+            let r = info.get(i).cloned().unwrap_or(String::new());
+            output.push_str(&format!("{} {}\n", l, r));
+        }
+
+        output
+    }
+
+    fn cmd_top(&mut self, processes: &ProcessManager, vfs: &VirtualFileSystem) -> String {
+        let stats = vfs.stats();
+        let mut output = String::from("\x1b[2J\x1b[H"); // Clear screen
+        output.push_str("\x1b[1;37;44m TRYMON SYSTEM MONITOR \x1b[0m\n\n");
+        output.push_str(&format!(" Uptime: {:>5} | Memory: {:>8} / 128MB | VFS: {:>6} files\n", 
+            processes.running_count(), 
+            format_size_human(processes.memory_usage() as u64),
+            stats.total_files));
+        output.push_str("\n\x1b[1m PID   PPID  NAME         STATE        MEMORY\x1b[0m\n");
+        
+        let procs = processes.list_processes();
+        for p in procs.iter().take(15) {
+            output.push_str(&format!(
+                " {:<5} {:<5} {:<12} {:<12} {}\n",
+                p.pid,
+                p.ppid.as_deref().unwrap_or("-"),
+                p.name,
+                format!("{:?}", p.state),
+                format_size_human(p.memory_usage as u64)
+            ));
+        }
+        
+        output.push_str("\n\x1b[2m (Showing current snapshot - Type 'clear' to exit monitor mode)\x1b[0m\n");
+        output
     }
 
     fn cmd_yes(&mut self, args: &[&str]) -> String {

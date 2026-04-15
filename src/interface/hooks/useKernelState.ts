@@ -15,24 +15,20 @@ import type { KernelState, BinaryInfo } from '../services/kernelService';
 // ============================================================
 
 export function useKernelState() {
-  const [state, setState] = useState<KernelState>(kernel.getState());
-  const [ready, setReady] = useState(kernel.isReady());
+  const [state, setState] = useState<KernelState>(() => kernel.getState());
 
   useEffect(() => {
-    // Subscribe to all kernel updates (including during boot)
+    // Subscribe to all kernel updates
     const unsubscribe = kernel.onUpdate((s) => {
       setState(s);
-      if (s.state === 'Running') {
-        setReady(true);
-      }
     });
 
-    // Poll for updates (kernel tick loop runs every 1s)
+    // Use poller for state updates when the kernel ticker runs
     const pollInterval = setInterval(() => {
-      // Only overwrite if kernel is ready, otherwise let init() management take priority
-      if (kernel.isReady()) {
-        setState(kernel.getState());
-      }
+      // Always get latest state if kernel is ready to be queried
+      // This prevents UI state from lagging behind WASM state
+      const currentState = kernel.getState();
+      setState(currentState);
     }, 1000);
 
     return () => {
@@ -41,6 +37,10 @@ export function useKernelState() {
     };
   }, []);
 
+  // Derived readiness
+  const ready = useMemo(() => {
+    return state.state === 'Running' || state.state === 'Ready';
+  }, [state.state]);
 
   return useMemo(() => ({
     ready,
@@ -148,13 +148,113 @@ export function useProcessById(pid: string | undefined) {
 export function useKernelShell() {
   const { ready } = useKernelState();
   const [output, setOutput] = useState('');
+  const [initialized, setInitialized] = useState(false);
 
-  const sendInput = useCallback((input: string) => {
-    const result = kernel.shellInput(input);
-    setOutput(prev => prev + result);
+  useEffect(() => {
+    if (ready && !initialized) {
+      const initialPrompt = kernel.getShellPrompt();
+      setOutput(initialPrompt);
+      setInitialized(true);
+    }
+  }, [ready, initialized]);
+
+  const clear = useCallback(() => {
+    setOutput(kernel.getShellPrompt());
   }, []);
 
-  const clear = useCallback(() => setOutput(''), []);
+  const sendInput = useCallback((input: string) => {
+    const trimmedInput = input.trim();
+    
+    // Command Interceptor for Native OS Actions
+    if (trimmedInput === 'clear') {
+      clear();
+      return;
+    }
+    
+    if (trimmedInput === 'exit') {
+      // Logic for exit usually involves closing the terminal window.
+      // This is often handled by the UI layer, but we can emit a signal here.
+      setOutput(prev => prev + '\nExiting terminal...\n');
+      return;
+    }
+
+    if (trimmedInput.startsWith('trym')) {
+      const args = trimmedInput.split(' ').slice(1);
+      const command = args[0];
+
+      if (!command || command === 'help') {
+        const help = `\r\n\x1b[1;33mTRYMON Package Manager (trym)\x1b[0m\r\n` +
+          `Usage: trym <command> [arguments]\r\n\r\n` +
+          `Commands:\r\n` +
+          `  \x1b[1;32mlist\x1b[0m           List installed applications\r\n` +
+          `  \x1b[1;32msearch <term>\x1b[0m  Search for packages in the repository\r\n` +
+          `  \x1b[1;32minstall <id>\x1b[0m   Install a package by ID\r\n` +
+          `  \x1b[1;32muninstall <id>\x1b[0m Remove an installed package\r\n` +
+          `  \x1b[1;32mupdate\x1b[0m         Update the package database\r\n\r\n`;
+        setOutput(prev => prev + help + kernel.getShellPrompt());
+        return;
+      }
+
+      if (command === 'list') {
+        const apps = kernel.listTrymonApps();
+        let listOut = `\r\n\x1b[1;33mInstalled Applications:\x1b[0m\r\n`;
+        if (apps.length === 0) {
+          listOut += `No applications installed via trym.\r\n`;
+        } else {
+          apps.forEach(app => {
+            listOut += ` \x1b[1;32m●\x1b[0m \x1b[1m${app.name || app.id}\x1b[0m (v${app.version || '1.0.0'})\r\n`;
+          });
+        }
+        setOutput(prev => prev + listOut + '\r\n' + kernel.getShellPrompt());
+        return;
+      }
+
+      if (command === 'search') {
+        const term = args[1];
+        if (!term) {
+          setOutput(prev => prev + `\r\ntrym: missing search term\r\n` + kernel.getShellPrompt());
+          return;
+        }
+        const results = kernel.searchRepository(term);
+        let searchOut = `\r\n\x1b[1;34mSearching for "${term}"...\x1b[0m\r\n`;
+        if (results.length === 0) {
+          searchOut += `No packages found matching "${term}".\r\n`;
+        } else {
+          results.forEach(item => {
+            searchOut += ` \x1b[1;32m➜\x1b[0m \x1b[1m${item.id}\x1b[0m: ${item.name} - ${item.desc}\r\n`;
+          });
+        }
+        setOutput(prev => prev + searchOut + '\r\n' + kernel.getShellPrompt());
+        return;
+      }
+
+      if (command === 'install') {
+        const appId = args[1];
+        if (!appId) {
+          setOutput(prev => prev + `\r\ntrym: missing package ID\r\n` + kernel.getShellPrompt());
+          return;
+        }
+        
+        // Mock installation sequence for UX
+        setOutput(prev => prev + `\r\n\x1b[1mInstalling ${appId}...\x1b[0m\r\nReading dependencies...\r\n`);
+        
+        setTimeout(() => {
+          const result = kernel.installTrymonApp(appId);
+          if (result) {
+            setOutput(prev => prev + `\x1b[1;34m[##########]\x1b[0m 100% - Unpacking\r\n\x1b[1;32mSUCCESS:\x1b[0m ${appId} installed successfully.\r\n\r\n` + kernel.getShellPrompt());
+          } else {
+            setOutput(prev => prev + `\x1b[1;31mERROR:\x1b[0m Package "${appId}" not found or installation failed.\r\n\r\n` + kernel.getShellPrompt());
+          }
+        }, 1000);
+        return;
+      }
+    }
+
+    const result = kernel.shellInput(input);
+    if (result) {
+      setOutput(prev => prev + result);
+    }
+  }, [clear]);
 
   const prompt = useMemo(() => kernel.getShellPrompt(), []);
 

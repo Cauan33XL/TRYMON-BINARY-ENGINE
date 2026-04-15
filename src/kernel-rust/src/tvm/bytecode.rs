@@ -151,6 +151,7 @@ fn create_syscall_bridge_wrapper() -> TVMBytecode {
 
 /// TVM Opcodes enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
 pub enum Opcode {
     // Stack operations (0x00-0x0F)
     /// Push immediate (1 byte value)
